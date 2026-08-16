@@ -10,11 +10,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check staged chunks
+      - name: Verify exact chunk hashes and reconstruction
         run: |
-          for f in .staging/v41_*.b64; do
-            echo "--- $f ---"
-            wc -c "$f"
-            sha256sum "$f"
-            if base64 -d "$f" >/dev/null; then echo "BASE64_OK"; else echo "BASE64_FAIL"; fi
-          done
+          cat > /tmp/expected.txt <<'EOF'
+          35e295feb81f29ff79cb867ae9df1573797bfcb7d494ec4833cedb6d1eba77d4  .staging/v41_01.b64
+          ef55f6ef759a4f680fb0852c1c2846d8fdc15283bcb68a85779de30057b9f955  .staging/v41_02a.b64
+          9b10baaeb07f9721456b57f7c7aedf71d33f44584e0da3374653560cc7438993  .staging/v41_02b.b64
+          196edf1477be42f0e092e086e2e7a09918bcdf990f04c0ca83f529ccbfc2f6b6  .staging/v41_03.b64
+          d3a9da8f34ef24cf9003dd4160309f29bd7fbfcfd9483a41714e22dcdd074f24  .staging/v41_04.b64
+          57f2b5c893053eb15950b54d0dec3c2974401f7029bf85ad02ad8f518144680b  .staging/v41_05.b64
+          b2c56cbcaacb12edf772ec30f6d7f2fe66ef5b36e2740e3c84f7c8ba2e1331af  .staging/v41_06.b64
+          4e8a11e4d880c9c6dcf3558dd63c2cbe00b561b62ff5279d896a16cc0ceb1d30  .staging/v41_07a.b64
+          03bc0d91c1cbe81c0b68417f2f7adaa03c0d0fb547148058394f7d98fac7f9e9  .staging/v41_07b.b64
+          cddbcdb03b5217aecb2e675379a5a70789f328afbc5386e80054513c3de6ece7  .staging/v41_08.b64
+          EOF
+          sha256sum -c /tmp/expected.txt || true
+          cat \
+            .staging/v41_01.b64 \
+            .staging/v41_02a.b64 \
+            .staging/v41_02b.b64 \
+            .staging/v41_03.b64 \
+            .staging/v41_04.b64 \
+            .staging/v41_05.b64 \
+            .staging/v41_06.b64 \
+            .staging/v41_07a.b64 \
+            .staging/v41_07b.b64 \
+            .staging/v41_08.b64 > /tmp/all.b64
+          echo "combined chars: $(wc -c < /tmp/all.b64)"
+          if base64 -d /tmp/all.b64 > /tmp/index.html; then
+            echo "decode: PASS"
+            wc -c /tmp/index.html
+            sha256sum /tmp/index.html
+          else
+            echo "decode: FAIL"
+            exit 1
+          fi
