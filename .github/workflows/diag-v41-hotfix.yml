@@ -1,0 +1,24 @@
+name: Diagnose v4.1 hotfix
+on:
+  push:
+    branches: [chatgpt/v4.1-hotfix]
+    paths: [.github/workflows/diag-v41-hotfix.yml]
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Chromium
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Diagnose Today form flow
+        run: |
+          python3 -m http.server 8765 >/tmp/http.log 2>&1 &
+          for i in {1..30}; do curl -fsS http://127.0.0.1:8765/ >/dev/null && break; sleep .5; done
+          cat > diag.cjs <<'NODE'
+          const {chromium}=require('playwright');
+          (async()=>{const b=await chromium.launch({headless:true});try{const p=await b.newPage();p.on('pageerror',e=>console.log('PAGEERROR',e.message));await p.goto('http://127.0.0.1:8765/');await p.evaluate(()=>localStorage.clear());await p.reload();const today=await p.evaluate(()=>{const d=new Date(),q=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${q(d.getMonth()+1)}-${q(d.getDate())}`});console.log('TODAY',today);await p.locator('#newTitle').fill('Due today + next');await p.locator('#newDate').fill(today);await p.locator('#newPath').fill('Alpha / Beta');await p.locator('#newNext').click();console.log('BEFORE_ADD',await p.evaluate(()=>({title:newTitle.value,date:newDate.value,path:newPath.value,next:newNext.className,view:document.querySelector('#nav button.active')?.dataset.view})));await p.locator('#addBtn').click();await p.waitForTimeout(200);console.log('AFTER_ADD',JSON.stringify(await p.evaluate(()=>({storage:JSON.parse(localStorage.getItem('doctrin-things-todo-v1')),cToday:cToday.textContent,content:content.innerText,view:document.querySelector('#nav button.active')?.dataset.view}))));await p.locator('button[data-view="today"]').click();await p.waitForTimeout(200);console.log('AFTER_TODAY',JSON.stringify(await p.evaluate(()=>({storage:JSON.parse(localStorage.getItem('doctrin-things-todo-v1')),cToday:cToday.textContent,content:content.innerText,view:document.querySelector('#nav button.active')?.dataset.view}))));}finally{await b.close()}})().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+          node diag.cjs
