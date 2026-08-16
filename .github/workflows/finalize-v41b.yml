@@ -31,7 +31,7 @@ jobs:
         run: |
           npm install --no-save playwright@1.55.0
           npx playwright install --with-deps chromium
-      - name: Chromium regression and UI flows
+      - name: Chromium regression and real UI flows
         run: |
           python3 -m http.server 8765 >/tmp/http.log 2>&1 &
           for i in {1..30}; do curl -fsS http://127.0.0.1:8765/ >/dev/null && break; sleep .5; done
@@ -48,41 +48,75 @@ jobs:
               assert(summary==='51/51 PASS',`selftest ${summary}`); assert(selfErr.length===0,`selftest errors ${selfErr.join(';')}`);
               console.log('SELFTEST',summary); await self.close();
 
-              const page=await browser.newPage(); const errs=[]; page.on('pageerror',e=>errs.push(e.message));
+              const ctx=await browser.newContext();
+              const page=await ctx.newPage(); const errs=[]; page.on('pageerror',e=>errs.push(e.message));
               await page.goto('http://127.0.0.1:8765/');
-              await page.evaluate(()=>{
-                const d=new Date(),p=n=>String(n).padStart(2,'0'),today=`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`,now=new Date().toISOString();
-                localStorage.clear();
-                localStorage.setItem('doctrin-things-todo-v1',JSON.stringify({version:5,appVersion:'4.1.0',updatedAt:now,tasks:[
-                  {id:'t1',title:'Due today + next',notes:'',dueDate:today,tags:{next:true,followup:false,some:false,nextWeekFor:today},completed:false,completedAt:null,cleared:false,path:['Alpha','Beta'],level:2,createdAt:now},
-                  {id:'t2',title:'Same path',notes:'',dueDate:'',tags:{next:false,followup:false,some:false,nextWeekFor:null},completed:false,completedAt:null,cleared:false,path:['Alpha','Beta'],level:2,createdAt:now}],backlog:[
-                  {id:'b1',type:'bug',title:'Test bug',description:'Bug description',selected:true,comment:'',status:'open',createdAt:now,updatedAt:now}]}));
-              });
+              await page.evaluate(()=>localStorage.clear());
               await page.reload();
+
+              const today=await page.evaluate(()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`});
+
+              // Create a due-today task through the UI and also mark it Next wk.
+              await page.locator('#newTitle').fill('Due today + next');
+              await page.locator('#newDate').fill(today);
+              await page.locator('#newPath').fill('Alpha / Beta');
+              await page.locator('#newNext').click();
+              await page.locator('#addBtn').click();
+
+              // Create a second task in the exact same path.
+              await page.locator('#newTitle').fill('Same path');
+              await page.locator('#newPath').fill('Alpha / Beta');
+              await page.locator('#addBtn').click();
+
+              // Today regression: date wins over Next wk tag.
               await page.locator('button[data-view="today"]').click();
               await page.getByText('Due today + next',{exact:true}).waitFor({state:'visible'});
-              assert(Number(await page.locator('#cToday').textContent())>=1,'Today count missing seeded item');
+              assert(Number(await page.locator('#cToday').textContent())>=1,'Today count missing due-today + Next wk task');
 
+              // Same-path collapse / expand.
               await page.locator('button[data-view="open"]').click();
-              assert(await page.locator('.task').count()===2,'expected two tasks');
-              const group=page.locator('[data-collapse]').first(); assert((await group.textContent()).includes('Alpha › Beta'),'path group missing');
+              assert(await page.locator('.task').count()===2,'expected two tasks created through UI');
+              const group=page.locator('[data-collapse]').filter({hasText:'Alpha › Beta'}).first();
+              await group.waitFor({state:'visible'});
               await group.click(); assert(await page.locator('.task').count()===0,'collapse failed');
               await group.click(); assert(await page.locator('.task').count()===2,'expand failed');
 
-              await page.locator('.task[data-id="t1"] .path-chip').click();
+              // Edit path by clicking the visible path chip.
+              const todayTask=page.getByText('Due today + next',{exact:true}).locator('..').locator('..');
+              await page.locator('.task').filter({hasText:'Due today + next'}).locator('.path-chip').click();
               await page.locator('#inlinePath').fill('Gamma / Delta');
               await page.locator('[data-action="inline-save"]').click();
               await page.getByText('Gamma › Delta',{exact:true}).first().waitFor({state:'visible'});
 
+              // Create and edit a bug in backlog, mark it for implementation, generate prompt.
               await page.locator('button[data-view="history"]').click();
-              const row=page.locator('[data-backlog="b1"]'); await row.waitFor({state:'visible'});
-              await row.locator('[data-bfield="comment"]').fill('Implement carefully'); await row.locator('[data-bfield="comment"]').press('Tab');
-              await page.locator('#generatePromptBtn').click(); const prompt=await page.locator('#promptBox').inputValue();
-              assert(prompt.includes('[BUG] Test bug'),'prompt missing bug'); assert(prompt.includes('Implement carefully'),'prompt missing comment');
-              await page.locator('#backlogType').selectOption('improvement'); await page.locator('#backlogTitle').fill('Smoke improvement'); await page.locator('#backlogAddBtn').click();
+              await page.locator('#backlogType').selectOption('bug');
+              await page.locator('#backlogTitle').fill('Test bug');
+              await page.locator('#backlogAddBtn').click();
+              const row=page.locator('.backlog-row').filter({has:page.locator('input[data-bfield="title"][value="Test bug"]')});
+              await row.waitFor({state:'visible'});
+              await row.locator('[data-bfield="description"]').fill('Bug description');
+              await row.locator('[data-bfield="description"]').press('Tab');
+              const refreshed=page.locator('.backlog-row').filter({has:page.locator('input[data-bfield="title"][value="Test bug"]')});
+              await refreshed.locator('[data-bfield="comment"]').fill('Implement carefully');
+              await refreshed.locator('[data-bfield="comment"]').press('Tab');
+              const refreshed2=page.locator('.backlog-row').filter({has:page.locator('input[data-bfield="title"][value="Test bug"]')});
+              await refreshed2.locator('[data-bfield="selected"]').check();
+              await page.locator('#generatePromptBtn').click();
+              const prompt=await page.locator('#promptBox').inputValue();
+              assert(prompt.includes('[BUG] Test bug'),'prompt missing selected bug');
+              assert(prompt.includes('Bug description'),'prompt missing description');
+              assert(prompt.includes('Implement carefully'),'prompt missing implementation comment');
+
+              // Add an improvement through the same backlog UI.
+              await page.locator('#backlogType').selectOption('improvement');
+              await page.locator('#backlogTitle').fill('Smoke improvement');
+              await page.locator('#backlogAddBtn').click();
               await page.getByDisplayValue('Smoke improvement').waitFor({state:'visible'});
+
               assert(errs.length===0,`page errors ${errs.join(';')}`);
-              console.log('UI_GATE PASS');
+              console.log('UI_GATE PASS: today, next-wk interaction, collapse/expand, path edit, backlog edit, prompt generation');
+              await ctx.close();
             }finally{await browser.close()}
           })().catch(e=>{console.error(e);process.exit(1)});
           NODE
@@ -96,11 +130,11 @@ jobs:
           - JavaScript syntax: **PASS**
           - Embedded regression suite in real Chromium: **51/51 PASS**
           - Local pre-publication functional/regression suite: **60/60 PASS**
-          - Today regression (due today while also Next wk): **PASS**
-          - Same-path collapse / expand: **PASS**
-          - Path editing through UI: **PASS**
-          - Editable backlog + implementation comment + generated prompt: **PASS**
-          - Add backlog improvement through UI: **PASS**
+          - Real UI: create task due today and also flag it `Next wk`; verify it appears in Today: **PASS**
+          - Real UI: create two todos in same path and collapse / expand group: **PASS**
+          - Real UI: edit path by clicking path chip: **PASS**
+          - Real UI: create/edit Bug backlog item, add implementation comment, select for implementation and generate prompt: **PASS**
+          - Real UI: add improvement backlog item: **PASS**
           - Browser page errors in tested flows: **0**
           - Live Dropbox write: **not performed** to protect production data; deterministic sync tests cover serialization/conflict behavior.
 
@@ -111,5 +145,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- index.html TEST_LOG_v4.1.0.md
-          git commit -m "[v41-final] Publish todo v4.1.0" -m "Passed 60/60 local tests, 51/51 embedded Chromium tests and UI smoke tests."
+          git commit -m "[v41-final] Publish todo v4.1.0" -m "Passed 60/60 local tests, 51/51 embedded Chromium tests and real UI smoke tests."
           git push
