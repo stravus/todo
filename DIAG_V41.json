@@ -1,0 +1,95 @@
+{
+  "today": "2026-08-16",
+  "before": {
+    "title": "Due today + next",
+    "date": "2026-08-16",
+    "path": "Alpha / Beta",
+    "next": true
+  },
+  "afterAdd": {
+    "stored": {
+      "version": 5,
+      "appVersion": "4.1.0",
+      "updatedAt": "2026-08-16T15:14:30.222Z",
+      "tasks": [
+        {
+          "id": "69275085-092f-4c9e-af76-df70d1eddc5c",
+          "title": "Due today + next",
+          "notes": "",
+          "dueDate": "2026-08-16",
+          "tags": {
+            "next": true,
+            "followup": false,
+            "some": false,
+            "nextWeekFor": "2026-08-17"
+          },
+          "completed": false,
+          "completedAt": null,
+          "cleared": false,
+          "path": [
+            "Alpha",
+            "Beta"
+          ],
+          "level": 2,
+          "createdAt": "2026-08-16T15:14:30.222Z"
+        }
+      ],
+      "backlog": [
+        {
+          "id": "af806051-969f-48f6-8cf3-8f329ec48fbe",
+          "type": "improvement",
+          "title": "Riktiga projekt/områden",
+          "description": "Gör de två översta nivåerna till förstaklassobjekt med project counts och tydligare projektmodell.",
+          "selected": false,
+          "comment": "",
+          "status": "open",
+          "createdAt": "2026-08-16T15:14:30.102Z",
+          "updatedAt": "2026-08-16T15:14:30.102Z"
+        },
+        {
+          "id": "189ba979-246d-4aa2-901b-86d802c27150",
+          "type": "improvement",
+          "title": "Inbox",
+          "description": "Separat snabbinkorg för sådant som ännu inte sorterats.",
+          "selected": false,
+          "comment": "",
+          "status": "open",
+          "createdAt": "2026-08-16T15:14:30.102Z",
+          "updatedAt": "2026-08-16T15:14:30.102Z"
+        },
+        {
+          "id": "7b7ffc0e-6da2-44df-a8d0-73df70ede75b",
+          "type": "improvement",
+          "title": "PWA / installera som app",
+          "description": "Hemscreen/Dock-installation och bättre offline-upplevelse.",
+          "selected": false,
+          "comment": "",
+          "status": "open",
+          "createdAt": "2026-08-16T15:14:30.102Z",
+          "updatedAt": "2026-08-16T15:14:30.102Z"
+        },
+        {
+          "id": "fa1d07e3-7663-4b3b-af1d-5bcae6e97965",
+          "type": "improvement",
+          "title": "Ännu mer Things-lik design",
+          "description": "Fortsatt visuell förenkling efter verklig användning.",
+          "selected": false,
+          "comment": "",
+          "status": "open",
+          "createdAt": "2026-08-16T15:14:30.102Z",
+          "updatedAt": "2026-08-16T15:14:30.102Z"
+        }
+      ]
+    },
+    "cToday": "1",
+    "view": "upcoming",
+    "content": "Today\nToday\n▼\nAlpha › Beta\n1\nDue today + next\nAlpha › Beta\nToday\nNext wk\nN\nF\nS\n•••"
+  },
+  "afterToday": {
+    "cToday": "1",
+    "view": "today",
+    "content": "Today\nToday\n▼\nAlpha › Beta\n1\nDue today + next\nAlpha › Beta\nToday\nNext wk\nN\nF\nS\n•••",
+    "html": "<section class=\"group\"><div class=\"group-title \">Today<span class=\"datehint\">Today</span></div><section class=\"path-group\"><button class=\"path-head\" data-collapse=\"today|today|Alpha › Beta\"><span class=\"caret\">▼</span><span>Alpha › Beta</span><span class=\"path-count\">1</span></button><div class=\"task\" data-id=\"69275085-092f-4c9e-af76-df70d1eddc5c\"><button class=\"check\" data-action=\"check\" title=\"Klarmarkera\"></button><div class=\"task-main\"><div class=\"task-title\" data-action=\"inline\">Due today + next</div><div class=\"meta\"><button class=\"path-chip\" data-action=\"path\">Alpha › Beta</button><span class=\"badge today\">Today</span><span class=\"badge next\">Next wk</span></div></div><div class=\"actions\"><button class=\"iconbtn on next\" data-action=\"next\" title=\"Next wk\">N</button><button class=\"iconbtn \" data-action=\"follow\" title=\"Follow-up\">F</button><button class=\"iconbtn \" data-action=\"some\" title=\"Sometimes\">S</button><button class=\"iconbtn\" data-action=\"edit\" title=\"Mer\">•••</button></div"
+  },
+  "errors": []
+}
