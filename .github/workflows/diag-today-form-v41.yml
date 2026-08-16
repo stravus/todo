@@ -1,0 +1,36 @@
+name: Diagnose v4.1 Today form flow
+on:
+  push:
+    branches: [chatgpt/v4.1]
+    paths: [.github/workflows/diag-today-form-v41.yml]
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply pending add-row layout fix
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('index.html'); s=p.read_text()
+          old='.addrow{display:grid;grid-template-columns:minmax(220px,1fr) 145px minmax(160px,.55fr) auto auto auto auto;gap:7px;background:#fff;border:1px solid var(--line);border-radius:13px;padding:8px;margin-bottom:22px;box-shadow:0 2px 10px rgba(0,0,0,.02)}.addrow input{border:0;outline:0;padding:6px 8px;min-width:0}'
+          new='.addrow{display:flex;flex-wrap:wrap;gap:7px;background:#fff;border:1px solid var(--line);border-radius:13px;padding:8px;margin-bottom:22px;box-shadow:0 2px 10px rgba(0,0,0,.02)}.addrow input{border:0;outline:0;padding:6px 8px;min-width:0}.addrow #newTitle{flex:1 1 260px}.addrow input[type=date]{flex:0 0 145px}.addrow .path-new{flex:1 1 190px;min-width:170px}'
+          assert old in s; s=s.replace(old,new,1)
+          old2='document.getElementById("addRow").style.display=["log","history"].includes(state.view)?"none":"grid"'
+          assert old2 in s; s=s.replace(old2,'document.getElementById("addRow").style.display=["log","history"].includes(state.view)?"none":"flex"',1)
+          p.write_text(s)
+          PY
+      - name: Install Chromium
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Inspect form-created Today item
+        run: |
+          python3 -m http.server 8765 >/tmp/http.log 2>&1 &
+          for i in {1..30}; do curl -fsS http://127.0.0.1:8765/ >/dev/null && break; sleep .5; done
+          cat > diag.cjs <<'NODE'
+          const {chromium}=require('playwright');
+          (async()=>{const b=await chromium.launch({headless:true});try{const p=await b.newPage();p.on('pageerror',e=>console.log('PAGEERROR',e.message));await p.goto('http://127.0.0.1:8765/');await p.evaluate(()=>localStorage.clear());await p.reload();const today=await p.evaluate(()=>{const d=new Date(),q=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${q(d.getMonth()+1)}-${q(d.getDate())}`});console.log('TODAY',today);await p.locator('#newTitle').fill('Due today + next');await p.locator('#newDate').fill(today);await p.locator('#newPath').fill('Alpha / Beta');await p.locator('#newNext').click();console.log('BEFORE_ADD',await p.evaluate(()=>({title:document.querySelector('#newTitle').value,date:document.querySelector('#newDate').value,path:document.querySelector('#newPath').value,next:document.querySelector('#newNext').className,active:document.querySelector('#nav button.active')?.dataset.view})));await p.locator('#addBtn').click();await p.waitForTimeout(250);console.log('AFTER_ADD_STORAGE',await p.evaluate(()=>JSON.parse(localStorage.getItem('doctrin-things-todo-v1'))));console.log('AFTER_ADD_DOM',await p.evaluate(()=>({active:document.querySelector('#nav button.active')?.dataset.view,cToday:document.querySelector('#cToday').textContent,content:document.querySelector('#content').innerText,taskCount:document.querySelectorAll('.task').length,pathBox:(()=>{const r=document.querySelector('#newPath').getBoundingClientRect();return {w:r.width,h:r.height}})()})));await p.locator('button[data-view="today"]').click();await p.waitForTimeout(250);console.log('AFTER_TODAY',await p.evaluate(()=>({active:document.querySelector('#nav button.active')?.dataset.view,cToday:document.querySelector('#cToday').textContent,content:document.querySelector('#content').innerText,taskCount:document.querySelectorAll('.task').length,storage:JSON.parse(localStorage.getItem('doctrin-things-todo-v1'))})));}finally{await b.close()}})().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+          node diag.cjs
