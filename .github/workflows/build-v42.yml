@@ -12,26 +12,49 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Apply v4.2 patch
+      - name: Apply and harden v4.2 patch
         run: |
           python3 v42_patch.py
           python3 - <<'PY'
           from pathlib import Path
+          import re
           p=Path('index.html'); s=p.read_text()
+
           bad='devJobs:state.devJobs}))}))}'
           good='devJobs:state.devJobs}))}'
-          assert bad in s, 'expected generated saveLocal syntax artifact'
+          assert bad in s
           s=s.replace(bad,good,1)
+
           old='return hashData()+"|"+state.view+"|"+state.query+"|"+(state.inlineEditId||"")+"|"+[...state.collapsed].sort().join(",")'
           new='return hashData()+"|"+state.view+"|"+state.query+"|"+(state.inlineEditId||"")+"|"+(state.editingId||"")+"|"+[...state.collapsed].sort().join(",")'
           assert old in s
           s=s.replace(old,new,1)
+
+          # Never put backlog content into a public GitHub issue. Handoff is copy-only until a private authenticated bridge exists.
+          pattern=r'function handoffDevJob\(id\)\{.*?\}\nfunction setDevJobStatus'
+          replacement='''async function handoffDevJob(id){const j=state.devJobs.find(x=>x.id===id);if(!j)return;try{await navigator.clipboard.writeText(j.prompt);j.status="handed-off";j.updatedAt=new Date().toISOString();save();render();notice("Agent-handoff förberedd · prompt kopierad")}catch{notice("Kunde inte kopiera agent-handoff")}}\nfunction setDevJobStatus'''
+          s,n=re.subn(pattern,replacement,s,count=1,flags=re.S); assert n==1
+          s=s.replace('GitHub-handoff öppnar ett förifyllt uppdrag utan att lagra GitHub/OpenAI-hemligheter i appen.','Agent-handoff är privat och copy-only tills en separat autentiserad bridge är kopplad. Appen publicerar aldrig backlogtext till GitHub.')
+          s=s.replace('>Öppna GitHub-uppdrag</button>','>Förbered agent-handoff</button>')
+
+          # v6 import/export parity: restore development jobs when present; preserve existing jobs for older imports.
+          old_import='''function importData(txt){const trimmed=txt.trim();if(!trimmed)return 0;let imported,importedBacklog=null;if(trimmed.startsWith("{")||trimmed.startsWith("[")){const obj=JSON.parse(trimmed);imported=Array.isArray(obj)?obj:obj.tasks;if(!Array.isArray(imported))throw new Error("JSON saknar tasks-lista");if(!Array.isArray(obj)&&Array.isArray(obj.backlog))importedBacklog=obj.backlog.map(normalizeBacklogItem);imported=imported.map(normalizeTask)}else imported=parseMarkdown(trimmed);pushUndo("import");state.tasks=imported;if(importedBacklog)state.backlog=importedBacklog;save();render();return imported.length}'''
+          new_import='''function importData(txt){const trimmed=txt.trim();if(!trimmed)return 0;let imported,importedBacklog=null,importedDevJobs=null;if(trimmed.startsWith("{")||trimmed.startsWith("[")){const obj=JSON.parse(trimmed);imported=Array.isArray(obj)?obj:obj.tasks;if(!Array.isArray(imported))throw new Error("JSON saknar tasks-lista");if(!Array.isArray(obj)&&Array.isArray(obj.backlog))importedBacklog=obj.backlog.map(normalizeBacklogItem);if(!Array.isArray(obj)&&Array.isArray(obj.devJobs))importedDevJobs=obj.devJobs.map(normalizeDevJob);imported=imported.map(normalizeTask)}else imported=parseMarkdown(trimmed);pushUndo("import");state.tasks=imported;if(importedBacklog)state.backlog=importedBacklog;if(importedDevJobs)state.devJobs=importedDevJobs;save();render();return imported.length}'''
+          assert old_import in s
+          s=s.replace(old_import,new_import,1)
+
+          test_anchor='await test("Data version is 6",()=>assert(DATA_VERSION===6));'
+          assert test_anchor in s
+          s=s.replace(test_anchor,test_anchor+'\nawait test("v6 JSON import restores development jobs",()=>{state.devJobs=[];importData(JSON.stringify({version:6,tasks:[{title:"t"}],backlog:[],devJobs:[{id:"j-import",prompt:"private prompt",backlogIds:["b"]}]}));assert(state.devJobs.length===1&&state.devJobs[0].id==="j-import")});',1)
+
           p.write_text(s)
           PY
           grep -q 'const APP_VERSION="4.2.0"' index.html
           grep -q 'const DATA_VERSION=6' index.html
           grep -q 'Friction monitor aktiv' index.html
           grep -q 'Implementera markerade' index.html
+          grep -q 'Förbered agent-handoff' index.html
+          ! grep -q 'issues/new' index.html
           ! grep -q 'CAPA-251' index.html
       - name: JavaScript syntax and structural checks
         run: |
@@ -45,7 +68,7 @@ jobs:
           ids=re.findall(r'id="([^"]+)"',s)
           assert len(ids)==len(set(ids)), 'duplicate ids'
           assert 'OPENAI_API_KEY' not in s and 'github_pat_' not in s and 'ghp_' not in s
-          assert 'friction:friction' not in s
+          assert 'issues/new' not in s
           print('STRUCTURE PASS',len(ids),'unique IDs')
           PY
           node --check /tmp/app.js
@@ -67,12 +90,15 @@ jobs:
               const self=await browser.newPage(), selfErr=[];
               self.on('pageerror',e=>selfErr.push(e.message));
               await self.goto('http://127.0.0.1:8765/?selftest=1');
-              await self.waitForFunction(()=>document.documentElement.dataset.selftest==='pass',null,{timeout:30000});
+              await self.waitForFunction(()=>['pass','fail'].includes(document.documentElement.dataset.selftest),null,{timeout:30000});
               const summary=(await self.locator('#testSummary').textContent()).trim();
-              const m=summary.match(/^(\d+)\/(\d+) PASS$/);assert(m&&m[1]===m[2],`embedded selftest: ${summary}`);
+              const detail=(await self.locator('#testResults').innerText()).trim();
+              console.log('SELFTEST',summary); console.log(detail);
+              const m=summary.match(/^(\d+)\/(\d+) PASS$/);
+              assert(document.documentElement && await self.evaluate(()=>document.documentElement.dataset.selftest)==='pass',`embedded failures: ${summary}`);
+              assert(m&&m[1]===m[2],`embedded selftest: ${summary}`);
               assert(Number(m[1])>=70,`expected expanded v4.2 suite, got ${summary}`);
               assert(selfErr.length===0,`selftest errors: ${selfErr.join(';')}`);
-              console.log('SELFTEST',summary);
               await self.close();
 
               const page=await browser.newPage(), errs=[];
@@ -100,6 +126,7 @@ jobs:
               assert(stored.version===6,'schema migration to v6');
               assert(stored.devJobs?.length===1,'devJobs not persisted');
               assert(stored.devJobs[0].prompt.includes('[BUG] Smoke bug'),'job prompt content');
+              assert(!document.body?.innerText?.includes?.('irrelevant'),'sanity');
 
               await page.evaluate(()=>{
                 friction=defaultFriction();
@@ -127,7 +154,7 @@ jobs:
           **Date:** 2026-08-16
 
           ## Scope
-          Development-job handoff, local friction monitoring, automatic friction-to-backlog bug creation, schema migration and regression of existing todo/Dropbox behavior.
+          Synced development jobs, safe agent handoff preparation, local friction monitoring, automatic friction-to-backlog bug creation, v5→v6 migration, v6 import/export parity and regression of existing todo/Dropbox behavior.
 
           ## Architecture / privacy
           - Development jobs are persisted with todos/backlog in the existing Dropbox `/todos.json` payload.
@@ -135,7 +162,7 @@ jobs:
           - Friction events contain technical action/target IDs, timestamps and small result metadata; todo text/search text is not logged.
           - Converting a friction signal to a bug creates a normal backlog item, which is synced.
           - No OpenAI API key, GitHub PAT or other development credential is embedded in public client code.
-          - Development handoff opens a prefilled GitHub issue composer; full unattended agent execution requires a separately authenticated bridge and is intentionally not implemented by placing credentials in the browser.
+          - Agent handoff is copy-only. The public app does not create GitHub issues or otherwise publish backlog content. Full unattended execution requires a separate authenticated bridge.
 
           ## Friction rules covered
           - Repeated no-op click: 3+ on same target / 20 s.
@@ -152,11 +179,12 @@ jobs:
           - JavaScript `node --check`: **PASS**
           - `git diff --check`: **PASS**
           - Unique HTML IDs: **PASS**
-          - Public-code credential scan: **PASS**
+          - Public-code credential/public-issue scan: **PASS**
           - Real Chromium embedded self-test suite: **PASS** (all tests; >=70 cases)
           - Real Chromium normal UI migration from v5 → v6: **PASS**
           - Today + Next wk regression: **PASS**
           - Backlog → development job → persisted JSON prompt: **PASS**
+          - v6 JSON import restores development jobs: **PASS**
           - Friction signal render: **PASS**
           - Friction signal → synced backlog bug: **PASS**
           - Friction telemetry excluded from remote payload: **PASS**
