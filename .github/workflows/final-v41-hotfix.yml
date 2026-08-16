@@ -1,0 +1,161 @@
+name: Final v4.1 hotfix gate
+on:
+  push:
+    branches: [chatgpt/v4.1-hotfix]
+    paths: [.github/workflows/final-v41-hotfix.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Apply add-row layout fix and syntax-check
+        run: |
+          test "$(git hash-object index.html)" = "1b2fa36c2a88339aa4f0e3553c6905878d949b47"
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('index.html'); s=p.read_text()
+          old='.addrow{display:grid;grid-template-columns:minmax(220px,1fr) 145px minmax(160px,.55fr) auto auto auto auto;gap:7px;background:#fff;border:1px solid var(--line);border-radius:13px;padding:8px;margin-bottom:22px;box-shadow:0 2px 10px rgba(0,0,0,.02)}.addrow input{border:0;outline:0;padding:6px 8px;min-width:0}'
+          new='.addrow{display:flex;flex-wrap:wrap;gap:7px;background:#fff;border:1px solid var(--line);border-radius:13px;padding:8px;margin-bottom:22px;box-shadow:0 2px 10px rgba(0,0,0,.02)}.addrow input{border:0;outline:0;padding:6px 8px;min-width:0}.addrow #newTitle{flex:1 1 260px}.addrow input[type=date]{flex:0 0 145px}.addrow .path-new{flex:1 1 190px;min-width:170px}'
+          assert s.count(old)==1
+          s=s.replace(old,new,1)
+          old2='document.getElementById("addRow").style.display=["log","history"].includes(state.view)?"none":"grid"'
+          new2='document.getElementById("addRow").style.display=["log","history"].includes(state.view)?"none":"flex"'
+          assert s.count(old2)==1
+          s=s.replace(old2,new2,1)
+          p.write_text(s)
+          PY
+          git diff --check
+          python3 - <<'PY'
+          import re
+          s=open('index.html',encoding='utf-8').read(); m=re.findall(r'<script>(.*?)</script>',s,re.S); assert len(m)==1
+          open('/tmp/app.js','w',encoding='utf-8').write(m[0])
+          PY
+          node --check /tmp/app.js
+          echo "FINAL_SHA=$(sha256sum index.html | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "FINAL_BYTES=$(wc -c < index.html)" >> "$GITHUB_ENV"
+      - name: Install Chromium
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Run Chromium regression and user-flow gate
+        run: |
+          python3 -m http.server 8765 >/tmp/http.log 2>&1 &
+          for i in {1..30}; do curl -fsS http://127.0.0.1:8765/ >/dev/null && break; sleep .5; done
+          cat > smoke.cjs <<'NODE'
+          const {chromium}=require('playwright');
+          const assert=(v,m)=>{if(!v)throw new Error(m)};
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            try{
+              const self=await browser.newPage(); const selfErr=[]; self.on('pageerror',e=>selfErr.push(e.message));
+              await self.goto('http://127.0.0.1:8765/?selftest=1');
+              await self.waitForFunction(()=>document.documentElement.dataset.selftest==='pass',null,{timeout:30000});
+              const summary=(await self.locator('#testSummary').textContent()).trim();
+              assert(summary==='54/54 PASS',`embedded suite: ${summary}`);
+              assert(selfErr.length===0,`selftest page errors: ${selfErr.join('; ')}`);
+              await self.close();
+
+              const ctx=await browser.newContext();
+              const page=await ctx.newPage(); const errs=[]; page.on('pageerror',e=>errs.push(e.message));
+              await page.goto('http://127.0.0.1:8765/');
+              await page.evaluate(()=>localStorage.clear()); await page.reload();
+              const today=await page.evaluate(()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`});
+
+              await page.locator('#newTitle').fill('Due today + next');
+              await page.locator('#newDate').fill(today);
+              await page.locator('#newPath').fill('Alpha / Beta');
+              await page.locator('#newNext').click();
+              await page.locator('#addBtn').click();
+
+              const stored=await page.evaluate(()=>JSON.parse(localStorage.getItem('doctrin-things-todo-v1')));
+              const created=stored.tasks.find(t=>t.title==='Due today + next');
+              assert(created, 'form-created task missing from persisted JSON');
+              assert(created.dueDate===today,`persisted due date mismatch: ${created.dueDate} vs ${today}`);
+              assert(created.tags.next===true,'Next wk flag not persisted');
+              const pathBox=await page.locator('#newPath').boundingBox();
+              assert(pathBox && pathBox.width>=160 && pathBox.height>0,`newPath collapsed: ${JSON.stringify(pathBox)}`);
+
+              await page.locator('button[data-view="today"]').click();
+              await page.waitForTimeout(100);
+              const todayUI=await page.evaluate(()=>({count:Number(cToday.textContent),text:content.innerText,view:document.querySelector('#nav button.active')?.dataset.view}));
+              assert(todayUI.view==='today','Today nav did not activate');
+              assert(todayUI.count>=1,`Today count is ${todayUI.count}`);
+              assert(todayUI.text.includes('Due today + next'),`Today content missing form-created item: ${todayUI.text}`);
+
+              await page.locator('button[data-view="open"]').click();
+              await page.locator('#newTitle').fill('Same path');
+              await page.locator('#newPath').fill('Alpha / Beta');
+              await page.locator('#addBtn').click();
+              const group=page.locator('[data-collapse]').filter({hasText:'Alpha › Beta'}).first();
+              await group.waitFor({state:'visible'});
+              const before=await page.locator('.task').count();
+              await group.click(); const collapsed=await page.locator('.task').count();
+              await group.click(); const expanded=await page.locator('.task').count();
+              assert(before>=2 && collapsed===0 && expanded>=2,`collapse flow ${before}/${collapsed}/${expanded}`);
+
+              await page.locator('.task').filter({hasText:'Due today + next'}).locator('.path-chip').click();
+              await page.locator('#inlinePath').fill('Gamma / Delta');
+              await page.locator('[data-action="inline-save"]').click();
+              assert((await page.locator('#content').innerText()).includes('Gamma › Delta'),'path edit not rendered');
+
+              await page.locator('button[data-view="history"]').click();
+              await page.locator('#backlogType').selectOption('bug');
+              await page.locator('#backlogTitle').fill('Test bug');
+              await page.locator('#backlogAddBtn').click();
+              let row=page.locator('.backlog-row').filter({has:page.locator('input[data-bfield="title"][value="Test bug"]')});
+              await row.waitFor({state:'visible'});
+              await row.locator('[data-bfield="description"]').fill('Bug description'); await row.locator('[data-bfield="description"]').press('Tab');
+              row=page.locator('.backlog-row').filter({has:page.locator('input[data-bfield="title"][value="Test bug"]')});
+              await row.locator('[data-bfield="comment"]').fill('Implement carefully'); await row.locator('[data-bfield="comment"]').press('Tab');
+              row=page.locator('.backlog-row').filter({has:page.locator('input[data-bfield="title"][value="Test bug"]')});
+              await row.locator('[data-bfield="selected"]').check();
+              await page.locator('#generatePromptBtn').click();
+              const prompt=await page.locator('#promptBox').inputValue();
+              assert(prompt.includes('[BUG] Test bug')&&prompt.includes('Bug description')&&prompt.includes('Implement carefully'),'generated prompt incomplete');
+
+              await page.locator('#backlogType').selectOption('improvement');
+              await page.locator('#backlogTitle').fill('Smoke improvement');
+              await page.locator('#backlogAddBtn').click();
+              await page.getByDisplayValue('Smoke improvement').waitFor({state:'visible'});
+              assert(errs.length===0,`normal page errors: ${errs.join('; ')}`);
+              console.log('FINAL_V41_HOTFIX_GATE PASS');
+              await ctx.close();
+            }finally{await browser.close()}
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+          node smoke.cjs
+      - name: Persist exactly tested code and cleanup diagnostics
+        run: |
+          cat >> TEST_LOG_v4.1.0.md <<EOF
+
+          ## Final v4.1 release-fix gate
+          A real Chromium UI gate found that the new-todo \`Sökväg\` input could collapse to 0 px after adding the first todo. The add row was changed from a rigid seven-column grid to a wrapping flex layout with a minimum width for the path field.
+
+          - Final tested SHA-256: **$FINAL_SHA**
+          - Final tested byte length: **$FINAL_BYTES bytes**
+          - JavaScript syntax: **PASS**
+          - Embedded regression suite in real Chromium: **54/54 PASS**
+          - Form persistence: due date and \`Next wk\` flag written correctly to JSON: **PASS**
+          - Real UI: due-today + \`Next wk\` appears in Today: **PASS**
+          - Real UI: new-todo path input remains >=160 px after first add: **PASS**
+          - Real UI: same-path collapse / expand: **PASS**
+          - Real UI: path-chip edit: **PASS**
+          - Real UI: editable Bug backlog + implementation comment + prompt generation: **PASS**
+          - Real UI: add improvement backlog item: **PASS**
+          - Browser page errors: **0**
+          - Live Dropbox write: **not performed**, deliberately, to protect production data.
+
+          **Final v4.1 release-fix gate: PASS.**
+          EOF
+          rm -f DIAG_V41.json
+          git rm -f -- .github/workflows/final-v41-hotfix.yml .github/workflows/diag-v41-hotfix.yml .github/workflows/diag-today-form-v41.yml 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- index.html TEST_LOG_v4.1.0.md
+          git add -u
+          git commit -m "Finalize tested todo v4.1.0 release fix"
+          git push
