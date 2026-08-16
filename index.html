@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src https://api.dropboxapi.com https://content.dropboxapi.com; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; object-src 'none'">
+<title>Doctrin Todo</title>
+<style>
+:root{
+  --bg:#f7f6f3; --panel:#efeee9; --card:#fff; --text:#292823; --muted:#8b8981;
+  --line:#dedcd4; --accent:#e04e39; --accentSoft:#f7ded8; --gold:#c58b2b; --blue:#4f75a8;
+  --shadow:0 8px 28px rgba(45,42,35,.08);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text)}
+button,input,select,textarea{font:inherit}
+button{cursor:pointer}
+.app{display:grid;grid-template-columns:250px minmax(0,1fr);min-height:100vh}
+.sidebar{background:var(--panel);border-right:1px solid var(--line);padding:28px 18px;position:sticky;top:0;height:100vh}
+.brand{font-weight:750;font-size:22px;letter-spacing:-.02em;padding:0 12px 22px}
+.brand span{color:var(--accent)}
+.nav{display:flex;flex-direction:column;gap:5px}
+.nav button{border:0;background:transparent;text-align:left;padding:10px 12px;border-radius:10px;color:#55534d;display:flex;justify-content:space-between;align-items:center}
+.nav button:hover{background:rgba(255,255,255,.65)}
+.nav button.active{background:white;color:var(--text);box-shadow:0 1px 4px rgba(0,0,0,.04);font-weight:650}
+.count{font-size:12px;color:var(--muted);background:#e4e2db;padding:2px 7px;border-radius:99px}
+.nav button.active .count{background:var(--accentSoft);color:var(--accent)}
+.sidebar-actions{position:absolute;left:18px;right:18px;bottom:20px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mini{border:1px solid var(--line);background:rgba(255,255,255,.55);border-radius:9px;padding:8px;color:#66645d}
+.mini:hover{background:#fff}
+.main{padding:38px 46px 80px;max-width:1040px;width:100%;margin:0 auto}
+.topbar{display:flex;align-items:center;gap:9px;margin-bottom:22px}
+h1{font-size:31px;letter-spacing:-.035em;margin:0;flex:1}
+.sub{color:var(--muted);font-size:13px;margin-top:4px}
+.search{border:1px solid var(--line);background:white;border-radius:10px;padding:9px 12px;width:220px;outline:none}
+.search:focus{border-color:#bbb8ad;box-shadow:0 0 0 3px rgba(0,0,0,.035)}
+.addrow{display:flex;gap:8px;background:white;border:1px solid var(--line);border-radius:13px;padding:8px;margin-bottom:22px;box-shadow:0 2px 10px rgba(0,0,0,.025)}
+.addrow input[type=text]{flex:1;border:0;outline:0;padding:6px 8px}
+.addrow input[type=date]{border:0;color:#6d6a63;outline:0;max-width:145px}
+.addbtn{border:0;background:var(--accent);color:#fff;border-radius:9px;padding:7px 13px;font-weight:650}
+.section{margin-top:24px}
+.section-title{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#8b8981;font-weight:750;margin:0 0 8px 8px}
+.task{background:var(--card);border:1px solid var(--line);border-radius:12px;margin:7px 0;padding:10px 12px;display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:7px;align-items:start;transition:.12s;box-shadow:0 1px 5px rgba(0,0,0,.018)}
+.task:hover{border-color:#cfccc2;box-shadow:0 4px 13px rgba(0,0,0,.04)}
+.check{width:19px;height:19px;border:1.5px solid #bdbab0;border-radius:50%;background:white;margin-top:2px;position:relative}
+.check:hover{border-color:var(--accent)}
+.task.done .check{background:var(--accent);border-color:var(--accent)}
+.task.done .check:after{content:"";position:absolute;left:5px;top:2px;width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.title{line-height:1.35;word-break:break-word}
+.done .title{text-decoration:line-through;color:#96938b}
+.meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:5px}
+.crumb{font-size:11px;color:#aaa79f}
+.badge{font-size:11px;padding:2px 7px;border-radius:99px;background:#eee;color:#6d6a63}
+.badge.next{background:#edf1f7;color:var(--blue)}
+.badge.some{background:#f5eddc;color:#9a6b1f}
+.badge.date{background:#eeeae5}
+.task-actions{display:flex;gap:3px;opacity:0;transition:.12s}
+.task:hover .task-actions{opacity:1}
+.iconbtn{border:0;background:transparent;border-radius:7px;padding:4px 6px;color:#aaa}
+.iconbtn:hover{background:#f1f0eb;color:#555}
+.empty{text-align:center;color:var(--muted);padding:70px 10px}
+.log-date{font-size:12px;color:var(--muted);font-weight:700;margin:22px 0 7px 8px}
+.drawer-back{position:fixed;inset:0;background:rgba(20,20,18,.18);display:none;z-index:4}
+.drawer{position:fixed;right:0;top:0;height:100vh;width:min(430px,94vw);background:#fff;box-shadow:-10px 0 35px rgba(0,0,0,.12);padding:28px;transform:translateX(101%);transition:.18s;z-index:5}
+.drawer.open{transform:translateX(0)}
+.drawer-back.open{display:block}
+.drawer h2{font-size:20px;margin:0 0 22px}
+.field{margin:15px 0}
+.field label{display:block;font-size:12px;color:var(--muted);font-weight:700;margin-bottom:6px}
+.field input,.field textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:10px;outline:none}
+.field textarea{min-height:100px;resize:vertical}
+.tagrow{display:flex;gap:8px}
+.tagbtn{border:1px solid var(--line);background:#fff;padding:7px 10px;border-radius:9px;color:#69665f}
+.tagbtn.on.next{background:#edf1f7;border-color:#cbd7e7;color:var(--blue)}
+.tagbtn.on.some{background:#f5eddc;border-color:#e7d5ab;color:#9a6b1f}
+.danger{margin-top:22px;border:0;background:#fff0ee;color:#b43b2b;border-radius:9px;padding:9px 11px}
+.modal{position:fixed;inset:0;background:rgba(20,20,18,.25);display:none;align-items:center;justify-content:center;z-index:10;padding:20px}
+.modal.open{display:flex}
+.modal-card{width:min(680px,96vw);background:white;border-radius:15px;padding:22px;box-shadow:var(--shadow)}
+.modal-card h2{margin:0 0 10px}
+.modal-card textarea{width:100%;height:320px;border:1px solid var(--line);border-radius:10px;padding:12px;resize:vertical}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
+.btn{border:1px solid var(--line);background:#fff;padding:8px 12px;border-radius:9px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:white}
+.notice{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:#302f2b;color:white;border-radius:10px;padding:9px 13px;font-size:13px;opacity:0;pointer-events:none;transition:.18s;z-index:20}
+.notice.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.clearbtn{border:1px solid var(--line);background:#fff;color:#77736b;border-radius:9px;padding:8px 11px;display:none;white-space:nowrap}
+.clearbtn:hover{background:#f2f0eb;color:#4d4a44}
+.day-block{margin:26px 0}
+.day-title{display:flex;align-items:baseline;gap:8px;margin:0 0 9px 7px;font-size:15px;font-weight:760;letter-spacing:-.01em}
+.day-title .datehint{font-size:12px;font-weight:500;color:var(--muted)}
+.day-title.nextweek{font-size:17px;color:var(--blue);margin-top:34px}
+.project{margin:18px 0 26px}
+.project-head{display:flex;align-items:center;gap:8px;color:#5f5c55;font-weight:760;font-size:13px;text-transform:uppercase;letter-spacing:.055em;margin:0 0 7px 7px}
+.project-head.context{color:#7c7971}
+.project-head .project-count{font-size:11px;color:#aaa79f;font-weight:600;letter-spacing:0;text-transform:none}
+.subgroup{margin:7px 0 12px 18px;border-left:2px solid #eceae4;padding-left:11px}
+.subgroup-head{font-size:12px;font-weight:720;color:#77736b;margin:8px 0 5px 3px}
+.task.level1{margin-left:0}
+.task.deep{margin-left:14px}
+.task.project-task{background:#fbfaf7;border-color:#d7d4cb}
+.task.project-task .title{font-weight:720}
+.task.cleared{display:none}
+.undo-hint{font-size:11px;color:#aaa79f;margin-top:12px;padding:0 12px}
+.syncbtn{grid-column:1/-1;border:1px solid var(--line);background:#fff;border-radius:9px;padding:9px 10px;color:#5f5c55;text-align:left;display:flex;align-items:center;gap:8px;justify-content:center}
+.syncbtn:hover{background:#faf9f6}
+.syncdot{width:8px;height:8px;border-radius:50%;background:#aaa79f;display:inline-block;flex:none}
+.syncbtn.connected .syncdot{background:#5a9367}
+.syncbtn.syncing .syncdot{background:#c58b2b}
+.syncbtn.error .syncdot{background:#c94b3a}
+.syncbtn.conflict .syncdot{background:#b86f2d}
+.sync-note{font-size:11px;color:#aaa79f;text-align:center;grid-column:1/-1;margin-top:-2px}
+.conflict-copy{color:#66635c;line-height:1.5;margin:5px 0 18px}
+.conflict-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+@media(max-width:720px){
+  .app{grid-template-columns:1fr}
+  .sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line);padding:14px}
+  .brand{padding:5px 7px 10px}
+  .nav{display:grid;grid-template-columns:repeat(3,1fr)}
+  .nav button{font-size:12px;padding:8px;gap:4px}
+  .sidebar-actions{position:static;margin-top:10px}
+  .main{padding:24px 14px 60px}
+  .search{width:140px}
+  .topbar{align-items:flex-start}
+  h1{font-size:26px}
+  .task-actions{opacity:1}
+  .addrow{flex-wrap:wrap}
+  .addrow input[type=text]{min-width:100%}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">Doctrin <span>Todo</span></div>
+    <nav class="nav">
+      <button data-view="seven" class="active">7 dagar <span class="count" id="cSeven">0</span></button>
+      <button data-view="open">Alla öppna <span class="count" id="cOpen">0</span></button>
+      <button data-view="next">Next wk <span class="count" id="cNext">0</span></button>
+      <button data-view="some">Sometimes <span class="count" id="cSome">0</span></button>
+      <button data-view="log">Logg <span class="count" id="cLog">0</span></button>
+    </nav>
+    <div class="sidebar-actions">
+      <button class="mini" id="importBtn">Import</button>
+      <button class="mini" id="exportBtn">Export</button>
+      <button class="syncbtn" id="syncBtn" title="Koppla till Dropbox"><span class="syncdot"></span><span id="syncText">Koppla Dropbox</span></button>
+      <div class="sync-note" id="syncNote">Datan sparas lokalt tills Dropbox kopplas.</div>
+      <div class="undo-hint" style="grid-column:1/-1">Ctrl/Cmd + Z = undo</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1 id="viewTitle">7 dagar</h1>
+        <div class="sub" id="viewSub">Förfallodatum idag eller kommande 7 dagar</div>
+      </div>
+      <button class="clearbtn" id="clearBtn">Rensa avklarade</button>
+      <input class="search" id="search" placeholder="Sök…">
+    </div>
+
+    <div class="addrow" id="addRow">
+      <input id="newTitle" type="text" placeholder="Ny todo…">
+      <input id="newDate" type="date" title="Datum">
+      <button class="addbtn" id="addBtn">Lägg till</button>
+    </div>
+
+    <div id="taskList"></div>
+  </main>
+</div>
+
+<div class="drawer-back" id="drawerBack"></div>
+<aside class="drawer" id="drawer">
+  <h2>Redigera</h2>
+  <div class="field"><label>Todo</label><input id="editTitle"></div>
+  <div class="field"><label>Datum</label><input id="editDate" type="date"></div>
+  <div class="field"><label>Notering</label><textarea id="editNotes" placeholder="Valfritt"></textarea></div>
+  <div class="field">
+    <label>Taggar</label>
+    <div class="tagrow">
+      <button class="tagbtn next" id="tagNext">Next wk</button>
+      <button class="tagbtn some" id="tagSome">Sometimes</button>
+    </div>
+  </div>
+  <button class="danger" id="deleteBtn">Ta bort</button>
+</aside>
+
+<div class="modal" id="importModal">
+  <div class="modal-card">
+    <h2>Importera</h2>
+    <div class="sub" style="margin-bottom:10px">Klistra in exporterad JSON eller Markdown med <b>- [ ]</b> / <b>- [x]</b>.</div>
+    <textarea id="importText"></textarea>
+    <div class="modal-actions">
+      <button class="btn" id="importCancel">Avbryt</button>
+      <button class="btn primary" id="importGo">Importera</button>
+    </div>
+  </div>
+</div>
+<div class="modal" id="conflictModal">
+  <div class="modal-card">
+    <h2>Synkkonflikt</h2>
+    <div class="conflict-copy">Dropbox-filen har ändrats sedan den här enheten senast läste den. Ingenting skrivs över automatiskt. Välj vilken version som ska vara master.</div>
+    <div class="conflict-actions">
+      <button class="btn" id="conflictCancel">Avbryt</button>
+      <button class="btn" id="conflictRemote">Behåll Dropbox</button>
+      <button class="btn primary" id="conflictLocal">Behåll denna enhet</button>
+    </div>
+  </div>
+</div>
+<div class="notice" id="notice"></div>
+
+<script>
+const STORAGE_KEY = "doctrin-things-todo-v1";
+const DROPBOX_APP_KEY = "twlbqdcxaln82p3";
+const DROPBOX_FILE = "/todos.json";
+const DROPBOX_REDIRECT_URI = "https://stravus.github.io/todo/";
+const DROPBOX_TOKEN_KEY = "doctrin-dropbox-token-v1";
+const CONFLICT_BACKUP_KEY = "doctrin-dropbox-conflict-backup-v1";
+const INITIAL_MARKDOWN = "";
+
+let state = {tasks:[],view:"seven",query:"",editingId:null,undoStack:[],drawerOriginal:null};
+function uid(){return crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2)}
+function isoDate(d=new Date()){const x=new Date(d.getTime()-d.getTimezoneOffset()*60000);return x.toISOString().slice(0,10)}
+function localDate(s){return new Date(s+"T12:00:00")}
+function addDays(date,days){const d=new Date(date);d.setDate(d.getDate()+days);return d}
+function mondayOf(date){const d=new Date(date),day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);d.setHours(12,0,0,0);return d}
+function cleanMarkdownTitle(s){return s.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,"$1").replace(/\s+/g," ").trim()}
+function extractUrl(s){const m=s.match(/\((https?:\/\/[^)]+)\)/)||s.match(/https?:\/\/\S+/);return m?m[1]||m[0]:""}
+function normalizeTask(t){const completed=!!t.completed;return{id:t.id||uid(),title:String(t.title||"Namnlös"),notes:t.notes||"",dueDate:t.dueDate||"",tags:{next:!!t.tags?.next,some:!!t.tags?.some},completed,completedAt:completed?(t.completedAt||new Date().toISOString()):null,cleared:typeof t.cleared==="boolean"?t.cleared:false,path:Array.isArray(t.path)?t.path:[],level:Number(t.level||0),createdAt:t.createdAt||new Date().toISOString()}}
+function parseMarkdown(md){const tasks=[],stack=[];for(const line of md.split(/\r?\n/)){const m=line.match(/^(\s*)-\s*\[([ xX])\]\s*(.+?)\s*$/);if(!m)continue;const indent=Math.floor(m[1].replace(/\t/g,"  ").length/2),raw=m[3],title=cleanMarkdownTitle(raw);while(stack.length>indent)stack.pop();const path=stack.map(x=>x.title),completed=m[2].toLowerCase()==="x";tasks.push({id:uid(),title,notes:extractUrl(raw),dueDate:"",tags:{next:false,some:false},completed,completedAt:completed?new Date().toISOString():null,cleared:false,path,level:indent,createdAt:new Date().toISOString()});stack[indent]={title};stack.length=indent+1}return tasks}
+function saveLocal(){localStorage.setItem(STORAGE_KEY,JSON.stringify({version:3,tasks:state.tasks}))}
+function save(){saveLocal();scheduleDropboxSave()}
+function load(){const saved=localStorage.getItem(STORAGE_KEY);if(saved){try{const obj=JSON.parse(saved);state.tasks=Array.isArray(obj.tasks)?obj.tasks.map(normalizeTask):[];saveLocal()}catch(e){state.tasks=parseMarkdown(INITIAL_MARKDOWN);saveLocal()}}else{state.tasks=parseMarkdown(INITIAL_MARKDOWN);saveLocal()}}
+function pushUndo(label){state.undoStack.push({label,tasks:JSON.parse(JSON.stringify(state.tasks))});if(state.undoStack.length>50)state.undoStack.shift()}
+function undo(){const prev=state.undoStack.pop();if(!prev){notice("Inget att ångra");return}state.tasks=prev.tasks;save();render();notice("Ångrade: "+prev.label)}
+function notice(msg){const n=document.getElementById("notice");n.textContent=msg;n.classList.add("show");clearTimeout(notice._t);notice._t=setTimeout(()=>n.classList.remove("show"),1700)}
+function weekBounds(){const today=localDate(isoDate()),currentMonday=mondayOf(today),currentSunday=addDays(currentMonday,6),nextMonday=addDays(currentMonday,7),nextSunday=addDays(currentMonday,13);return{today,currentMonday,currentSunday,nextMonday,nextSunday}}
+function inCalendarWindow(t){if(!t.dueDate)return false;const d=localDate(t.dueDate),{today,nextSunday}=weekBounds();return d>=today&&d<=nextSunday}
+function matchesView(t){if(state.view==="log")return t.completed;if(t.cleared)return false;if(state.view==="seven")return inCalendarWindow(t);if(state.view==="next")return!!t.tags?.next;if(state.view==="some")return!!t.tags?.some;return true}
+function filtered(){let a=state.tasks.filter(matchesView);if(state.query.trim()){const q=state.query.toLowerCase();a=a.filter(t=>(t.title+" "+(t.path||[]).join(" ")+" "+(t.notes||"")).toLowerCase().includes(q))}if(state.view==="log")a.sort((a,b)=>(b.completedAt||"").localeCompare(a.completedAt||""));else a.sort((a,b)=>{if(a.dueDate&&b.dueDate)return a.dueDate.localeCompare(b.dueDate);if(a.dueDate)return-1;if(b.dueDate)return 1;return(a.createdAt||"").localeCompare(b.createdAt||"")});return a}
+function esc(s){return(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function humanDate(d){if(!d)return"";const today=isoDate(),tom=isoDate(addDays(localDate(today),1));if(d===today)return"Idag";if(d===tom)return"Imorgon";return new Intl.DateTimeFormat("sv-SE",{day:"numeric",month:"short"}).format(localDate(d))}
+function weekdayLabel(d){return new Intl.DateTimeFormat("sv-SE",{weekday:"long"}).format(localDate(d)).replace(/^./,c=>c.toUpperCase())}
+function renderTask(t,opts={}){const badges=[];if(t.dueDate)badges.push(`<span class="badge date">${esc(humanDate(t.dueDate))}</span>`);if(t.tags?.next)badges.push(`<span class="badge next">Next wk</span>`);if(t.tags?.some)badges.push(`<span class="badge some">Sometimes</span>`);const trimmedPath=(t.path||[]).slice(opts.hidePathLevels||0),crumb=trimmedPath.length?`<span class="crumb">${esc(trimmedPath.join(" › "))}</span>`:"",cls=["task",t.completed?"done":"",opts.project?"project-task":"",t.level===1?"level1":"",t.level>=2?"deep":""].filter(Boolean).join(" ");return`<div class="${cls}" data-id="${t.id}"><button class="check" data-action="check" title="${t.completed?"Återöppna":"Klarmarkera"}"></button><div><div class="title">${esc(t.title)}</div><div class="meta">${crumb}${badges.join("")}</div></div><div class="task-actions"><button class="iconbtn" data-action="next" title="Next wk">N</button><button class="iconbtn" data-action="some" title="Sometimes">S</button><button class="iconbtn" data-action="edit" title="Redigera">•••</button></div></div>`}
+function rootName(t){return t.level===0?t.title:((t.path||[])[0]||"Övrigt")}
+function secondName(t){if(t.level<=1)return t.level===1?t.title:"";return(t.path||[])[1]||""}
+function renderStructured(items){if(!items.length)return"";const groups=new Map();for(const t of items){const root=rootName(t);if(!groups.has(root))groups.set(root,[]);groups.get(root).push(t)}let out="";for(const[root,group]of groups){const rootTask=group.find(t=>t.level===0&&t.title===root),descendants=group.filter(t=>t!==rootTask);out+=`<div class="project">`;if(rootTask)out+=renderTask(rootTask,{project:true});else out+=`<div class="project-head context">${esc(root)} <span class="project-count">${descendants.length}</span></div>`;const secondGroups=new Map(),direct=[];for(const t of descendants){if(t.level===1){const key=t.title;if(!secondGroups.has(key))secondGroups.set(key,[]);secondGroups.get(key).unshift(t)}else if(t.level>=2){const key=secondName(t)||"Övrigt";if(!secondGroups.has(key))secondGroups.set(key,[]);secondGroups.get(key).push(t)}else direct.push(t)}for(const t of direct)out+=renderTask(t,{hidePathLevels:1});for(const[second,sg]of secondGroups){const parent=sg.find(t=>t.level===1&&t.title===second),children=sg.filter(t=>t!==parent);out+=`<div class="subgroup">`;if(parent)out+=renderTask(parent,{hidePathLevels:1});else out+=`<div class="subgroup-head">${esc(second)}</div>`;out+=children.map(t=>renderTask(t,{hidePathLevels:2})).join("");out+=`</div>`}out+=`</div>`}return out}
+function renderSeven(items){const{today,currentSunday,nextMonday,nextSunday}=weekBounds(),todayIso=isoDate(today);let h="";const todayItems=items.filter(t=>t.dueDate===todayIso);if(todayItems.length)h+=`<div class="day-block"><div class="day-title">Idag <span class="datehint">${humanDate(todayIso)}</span></div>${renderStructured(todayItems)}</div>`;for(let d=addDays(today,1);d<=currentSunday;d=addDays(d,1)){const ds=isoDate(d),dayItems=items.filter(t=>t.dueDate===ds);if(dayItems.length)h+=`<div class="day-block"><div class="day-title">${esc(weekdayLabel(ds))} <span class="datehint">${humanDate(ds)}</span></div>${renderStructured(dayItems)}</div>`}const nextItems=items.filter(t=>{if(!t.dueDate)return false;const d=localDate(t.dueDate);return d>=nextMonday&&d<=nextSunday});if(nextItems.length)h+=`<div class="day-block"><div class="day-title nextweek">Next wk <span class="datehint">${humanDate(isoDate(nextMonday))}–${humanDate(isoDate(nextSunday))}</span></div>${renderStructured(nextItems)}</div>`;return h}
+function render(){const titles={seven:["7 dagar","Idag + resten av innevarande kalendervecka + nästa vecka"],open:["Alla öppna","Aktiva todos, inklusive avcheckade tills du rensar dem"],next:["Next wk","Saker du vill ta nästa vecka"],some:["Sometimes","Saker utan brådska"],log:["Logg","Alla avklarade todos"]};document.getElementById("viewTitle").textContent=titles[state.view][0];document.getElementById("viewSub").textContent=titles[state.view][1];document.getElementById("addRow").style.display=state.view==="log"?"none":"flex";document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("active",b.dataset.view===state.view));const active=state.tasks.filter(t=>!t.cleared);document.getElementById("cOpen").textContent=active.length;document.getElementById("cSeven").textContent=active.filter(inCalendarWindow).length;document.getElementById("cNext").textContent=active.filter(t=>t.tags?.next).length;document.getElementById("cSome").textContent=active.filter(t=>t.tags?.some).length;document.getElementById("cLog").textContent=state.tasks.filter(t=>t.completed).length;const a=filtered(),clearBtn=document.getElementById("clearBtn");clearBtn.style.display=(state.view!=="log"&&a.some(t=>t.completed&&!t.cleared))?"block":"none";const list=document.getElementById("taskList");if(!a.length){list.innerHTML=`<div class="empty">Inget här just nu.</div>`;return}if(state.view==="log"){const groups={};a.forEach(t=>{const k=(t.completedAt||"").slice(0,10)||"Tidigare";(groups[k]||=[]).push(t)});list.innerHTML=Object.entries(groups).map(([date,items])=>`<div class="log-date">${date==="Tidigare"?date:new Intl.DateTimeFormat("sv-SE",{weekday:"long",day:"numeric",month:"long",year:"numeric"}).format(localDate(date))}</div>`+renderStructured(items)).join("")}else if(state.view==="seven")list.innerHTML=renderSeven(a)||`<div class="empty">Inget planerat till och med nästa söndag.</div>`;else list.innerHTML=renderStructured(a)}
+function addTask(){const input=document.getElementById("newTitle"),title=input.value.trim();if(!title)return;pushUndo("lägg till todo");state.tasks.push({id:uid(),title,notes:"",dueDate:document.getElementById("newDate").value,tags:{next:state.view==="next",some:state.view==="some"},completed:false,completedAt:null,cleared:false,path:[],level:0,createdAt:new Date().toISOString()});input.value="";document.getElementById("newDate").value="";save();render()}
+function findTask(id){return state.tasks.find(t=>t.id===id)}
+function toggleComplete(t){pushUndo(t.completed?"återöppna todo":"klarmarkera todo");t.completed=!t.completed;t.completedAt=t.completed?new Date().toISOString():null;t.cleared=false;save();render();notice(t.completed?"Avklarad – ligger kvar tills du rensar":"Återöppnad")}
+function openDrawer(t){state.editingId=t.id;state.drawerOriginal=JSON.stringify(t);document.getElementById("editTitle").value=t.title;document.getElementById("editDate").value=t.dueDate||"";document.getElementById("editNotes").value=t.notes||"";document.getElementById("tagNext").classList.toggle("on",!!t.tags?.next);document.getElementById("tagSome").classList.toggle("on",!!t.tags?.some);document.getElementById("drawer").classList.add("open");document.getElementById("drawerBack").classList.add("open")}
+function closeDrawer(){const t=findTask(state.editingId);if(t){const updated={...t,title:document.getElementById("editTitle").value.trim()||t.title,dueDate:document.getElementById("editDate").value,notes:document.getElementById("editNotes").value,tags:{next:document.getElementById("tagNext").classList.contains("on"),some:document.getElementById("tagSome").classList.contains("on")}};if(JSON.stringify(updated)!==state.drawerOriginal){pushUndo("redigera todo");Object.assign(t,updated);save()}}document.getElementById("drawer").classList.remove("open");document.getElementById("drawerBack").classList.remove("open");state.editingId=null;state.drawerOriginal=null;render()}
+function clearCompleted(){const ids=new Set(filtered().filter(t=>t.completed&&!t.cleared).map(t=>t.id));if(!ids.size)return;pushUndo("rensa avklarade");state.tasks.forEach(t=>{if(ids.has(t.id))t.cleared=true});save();render();notice(`${ids.size} avklarade rensade`)}
+function exportData(){const payload={app:"Doctrin Todo",version:3,exportedAt:new Date().toISOString(),tasks:state.tasks},blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`doctrin-todo-${isoDate()}.json`;a.click();URL.revokeObjectURL(a.href);notice("Export klar")}
+function importData(txt){const trimmed=txt.trim();if(!trimmed)return 0;let imported=[];if(trimmed.startsWith("{")||trimmed.startsWith("[")){const obj=JSON.parse(trimmed);imported=Array.isArray(obj)?obj:obj.tasks;if(!Array.isArray(imported))throw new Error("JSON saknar tasks-lista");imported=imported.map(normalizeTask)}else imported=parseMarkdown(trimmed);pushUndo("import");state.tasks=imported;save();render();return imported.length}
+const syncState={accessToken:null,expiresAt:0,remoteRev:null,ready:false,timer:null,saving:false,queued:false,conflictLocal:null,conflictRemote:null};
+function redirectUri(){return DROPBOX_REDIRECT_URI}
+function readStoredToken(){try{const x=JSON.parse(localStorage.getItem(DROPBOX_TOKEN_KEY)||"null");if(x&&x.accessToken&&x.expiresAt){syncState.accessToken=x.accessToken;syncState.expiresAt=x.expiresAt}}catch(e){}}
+function storeToken(accessToken,expiresIn){syncState.accessToken=accessToken;syncState.expiresAt=Date.now()+(Number(expiresIn)||14400)*1000;localStorage.setItem(DROPBOX_TOKEN_KEY,JSON.stringify({accessToken:syncState.accessToken,expiresAt:syncState.expiresAt}))}
+function clearToken(){syncState.accessToken=null;syncState.expiresAt=0;syncState.remoteRev=null;syncState.ready=false;localStorage.removeItem(DROPBOX_TOKEN_KEY)}
+function tokenValid(){return!!syncState.accessToken&&Date.now()<syncState.expiresAt-60000}
+function setSyncStatus(kind,text,note){const b=document.getElementById("syncBtn"),t=document.getElementById("syncText"),n=document.getElementById("syncNote");b.classList.remove("connected","syncing","error","conflict");if(kind)b.classList.add(kind);t.textContent=text;n.textContent=note||""}
+function syncTime(){return new Intl.DateTimeFormat("sv-SE",{hour:"2-digit",minute:"2-digit"}).format(new Date())}
+function randomVerifier(){const bytes=new Uint8Array(64);crypto.getRandomValues(bytes);return Array.from(bytes,b=>(b%36).toString(36)).join("")}
+function base64url(bytes){let s="";bytes.forEach(b=>s+=String.fromCharCode(b));return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"")}
+async function sha256Base64url(text){const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(text));return base64url(new Uint8Array(digest))}
+async function connectDropbox(){if(!window.isSecureContext){alert("Dropbox-inloggningen kräver HTTPS. Öppna appen via GitHub Pages.");return}const verifier=randomVerifier(),challenge=await sha256Base64url(verifier),oauthState=uid();sessionStorage.setItem("dbx_pkce_verifier",verifier);sessionStorage.setItem("dbx_oauth_state",oauthState);const u=new URL("https://www.dropbox.com/oauth2/authorize");u.searchParams.set("client_id",DROPBOX_APP_KEY);u.searchParams.set("response_type","code");u.searchParams.set("redirect_uri",redirectUri());u.searchParams.set("code_challenge_method","S256");u.searchParams.set("code_challenge",challenge);u.searchParams.set("state",oauthState);u.searchParams.set("token_access_type","online");location.href=u.toString()}
+async function handleOAuthCallback(){const u=new URL(location.href),code=u.searchParams.get("code"),error=u.searchParams.get("error");if(error){history.replaceState({},"",redirectUri());setSyncStatus("error","Dropbox nekad","Klicka för att försöka igen.");return true}if(!code)return false;const expected=sessionStorage.getItem("dbx_oauth_state"),returned=u.searchParams.get("state"),verifier=sessionStorage.getItem("dbx_pkce_verifier");history.replaceState({},"",redirectUri());if(!verifier||!expected||returned!==expected){setSyncStatus("error","Dropbox-fel","OAuth-state kunde inte verifieras.");return true}setSyncStatus("syncing","Kopplar Dropbox…","Verifierar inloggningen.");const body=new URLSearchParams({code,grant_type:"authorization_code",client_id:DROPBOX_APP_KEY,redirect_uri:redirectUri(),code_verifier:verifier}),res=await fetch("https://api.dropboxapi.com/oauth2/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});sessionStorage.removeItem("dbx_pkce_verifier");sessionStorage.removeItem("dbx_oauth_state");if(!res.ok){setSyncStatus("error","Dropbox-fel","Token kunde inte hämtas. Kontrollera Redirect URI.");return true}const data=await res.json();storeToken(data.access_token,data.expires_in);await pullDropbox(true);return true}
+function authHeaders(extra={}){return{Authorization:`Bearer ${syncState.accessToken}`,...extra}}
+async function downloadDropbox(){const res=await fetch("https://content.dropboxapi.com/2/files/download",{method:"POST",headers:authHeaders({"Dropbox-API-Arg":JSON.stringify({path:DROPBOX_FILE})})});if(res.status===401)throw Object.assign(new Error("auth"),{kind:"auth"});if(res.status===409)return{missing:true};if(!res.ok)throw new Error(`Dropbox download ${res.status}`);const meta=JSON.parse(res.headers.get("dropbox-api-result")||"{}"),data=JSON.parse(await res.text());return{data,rev:meta.rev||null,missing:false}}
+function remotePayload(){return{app:"Doctrin Todo",version:3,updatedAt:new Date().toISOString(),tasks:state.tasks}}
+async function uploadDropbox(payload,rev){const mode=rev?{".tag":"update",update:rev}:{".tag":"add"},arg={path:DROPBOX_FILE,mode,autorename:false,mute:true,strict_conflict:true},res=await fetch("https://content.dropboxapi.com/2/files/upload",{method:"POST",headers:authHeaders({"Content-Type":"application/octet-stream","Dropbox-API-Arg":JSON.stringify(arg)}),body:JSON.stringify(payload)});if(res.status===401)throw Object.assign(new Error("auth"),{kind:"auth"});if(res.status===409)throw Object.assign(new Error("conflict"),{kind:"conflict"});if(!res.ok)throw new Error(`Dropbox upload ${res.status}`);return await res.json()}
+function applyRemote(data,rev){if(!data||!Array.isArray(data.tasks))throw new Error("Dropbox-filen har fel format");state.tasks=data.tasks.map(normalizeTask);syncState.remoteRev=rev;saveLocal();render()}
+async function pullDropbox(){if(!tokenValid()){clearToken();setSyncStatus("","Koppla Dropbox","Datan sparas lokalt tills Dropbox kopplas.");return}setSyncStatus("syncing","Synkar…","Läser todos.json från Dropbox.");try{const remote=await downloadDropbox();if(remote.missing){syncState.remoteRev=null;syncState.ready=true;if(state.tasks.length)await saveDropboxNow();else setSyncStatus("connected","Dropbox kopplad","Ingen todos.json ännu — importera din lista så skapas den.");return}applyRemote(remote.data,remote.rev);syncState.ready=true;setSyncStatus("connected",`Synkad ${syncTime()}`,"Dropbox/todos.json är master.")}catch(e){handleSyncError(e)}}
+function scheduleDropboxSave(){if(!syncState.ready||!tokenValid())return;clearTimeout(syncState.timer);syncState.timer=setTimeout(saveDropboxNow,650)}
+async function saveDropboxNow(){if(!syncState.ready||!tokenValid())return;if(syncState.saving){syncState.queued=true;return}syncState.saving=true;setSyncStatus("syncing","Sparar…","Skriver till Dropbox/todos.json.");try{const meta=await uploadDropbox(remotePayload(),syncState.remoteRev);syncState.remoteRev=meta.rev||syncState.remoteRev;setSyncStatus("connected",`Synkad ${syncTime()}`,"Dropbox/todos.json är master.")}catch(e){if(e.kind==="conflict")await prepareConflict();else handleSyncError(e)}finally{syncState.saving=false;if(syncState.queued){syncState.queued=false;scheduleDropboxSave()}}}
+function handleSyncError(e){if(e.kind==="auth"){clearToken();setSyncStatus("error","Återanslut Dropbox","Dropbox-sessionen har gått ut. Klicka för att logga in igen.")}else{console.error(e);setSyncStatus("error","Synkfel","Lokala ändringar är kvar. Klicka för att försöka synka igen.")}}
+async function prepareConflict(){setSyncStatus("conflict","Synkkonflikt","Ingenting skrivs över innan du väljer version.");try{const local=JSON.parse(JSON.stringify(remotePayload())),remote=await downloadDropbox();if(remote.missing){syncState.remoteRev=null;await saveDropboxNow();return}syncState.conflictLocal=local;syncState.conflictRemote=remote;document.getElementById("conflictModal").classList.add("open")}catch(e){handleSyncError(e)}}
+function closeConflict(){document.getElementById("conflictModal").classList.remove("open")}
+async function chooseRemoteConflict(){if(!syncState.conflictRemote)return;localStorage.setItem(CONFLICT_BACKUP_KEY,JSON.stringify(syncState.conflictLocal));applyRemote(syncState.conflictRemote.data,syncState.conflictRemote.rev);closeConflict();syncState.conflictLocal=null;syncState.conflictRemote=null;setSyncStatus("connected",`Synkad ${syncTime()}`,"Dropbox-versionen används. Lokal konfliktbackup sparades i webbläsaren.")}
+async function chooseLocalConflict(){if(!syncState.conflictLocal||!syncState.conflictRemote)return;try{setSyncStatus("syncing","Sparar vald version…","Kontrollerar Dropbox-revisionen igen.");const meta=await uploadDropbox(syncState.conflictLocal,syncState.conflictRemote.rev);syncState.remoteRev=meta.rev;closeConflict();syncState.conflictLocal=null;syncState.conflictRemote=null;setSyncStatus("connected",`Synkad ${syncTime()}`,"Den här enhetens version är nu master.")}catch(e){closeConflict();if(e.kind==="conflict")await prepareConflict();else handleSyncError(e)}}
+async function initDropbox(){readStoredToken();try{const callback=await handleOAuthCallback();if(callback)return;if(tokenValid())await pullDropbox();else if(syncState.accessToken){clearToken();setSyncStatus("error","Återanslut Dropbox","Dropbox-sessionen har gått ut.")}else setSyncStatus("","Koppla Dropbox","Datan sparas lokalt tills Dropbox kopplas.")}catch(e){handleSyncError(e)}}
+document.querySelectorAll(".nav button").forEach(b=>b.addEventListener("click",()=>{state.view=b.dataset.view;render()}));
+document.getElementById("search").addEventListener("input",e=>{state.query=e.target.value;render()});
+document.getElementById("addBtn").addEventListener("click",addTask);
+document.getElementById("newTitle").addEventListener("keydown",e=>{if(e.key==="Enter")addTask()});
+document.getElementById("clearBtn").addEventListener("click",clearCompleted);
+document.getElementById("taskList").addEventListener("click",e=>{const taskEl=e.target.closest(".task");if(!taskEl)return;const t=findTask(taskEl.dataset.id);if(!t)return;const action=e.target.closest("[data-action]")?.dataset.action;if(action==="check")return toggleComplete(t);if(action==="next"){pushUndo("ändra Next wk");t.tags||={};t.tags.next=!t.tags.next;save();render();return}if(action==="some"){pushUndo("ändra Sometimes");t.tags||={};t.tags.some=!t.tags.some;save();render();return}openDrawer(t)});
+document.getElementById("drawerBack").addEventListener("click",closeDrawer);
+document.getElementById("tagNext").addEventListener("click",e=>{e.preventDefault();e.currentTarget.classList.toggle("on")});
+document.getElementById("tagSome").addEventListener("click",e=>{e.preventDefault();e.currentTarget.classList.toggle("on")});
+document.getElementById("deleteBtn").addEventListener("click",()=>{if(!state.editingId)return;pushUndo("ta bort todo");state.tasks=state.tasks.filter(t=>t.id!==state.editingId);save();document.getElementById("drawer").classList.remove("open");document.getElementById("drawerBack").classList.remove("open");state.editingId=null;state.drawerOriginal=null;render();notice("Borttagen")});
+document.getElementById("exportBtn").addEventListener("click",exportData);
+document.getElementById("importBtn").addEventListener("click",()=>{document.getElementById("importText").value="";document.getElementById("importModal").classList.add("open")});
+document.getElementById("importCancel").addEventListener("click",()=>document.getElementById("importModal").classList.remove("open"));
+document.getElementById("importGo").addEventListener("click",()=>{try{const n=importData(document.getElementById("importText").value);document.getElementById("importModal").classList.remove("open");notice(`${n} todos importerade`)}catch(e){alert("Kunde inte importera: "+e.message)}});
+document.getElementById("syncBtn").addEventListener("click",async()=>{if(!tokenValid())return connectDropbox();await pullDropbox()});
+document.getElementById("conflictCancel").addEventListener("click",()=>{closeConflict();setSyncStatus("conflict","Ej synkad","Lokala ändringar finns kvar på denna enhet.")});
+document.getElementById("conflictRemote").addEventListener("click",chooseRemoteConflict);
+document.getElementById("conflictLocal").addEventListener("click",chooseLocalConflict);
+document.addEventListener("keydown",e=>{const undoKey=e.key.toLowerCase()==="z"&&(e.ctrlKey||e.metaKey)&&!e.shiftKey;if(!undoKey)return;const active=document.activeElement,isTyping=active&&(active.tagName==="INPUT"||active.tagName==="TEXTAREA"||active.isContentEditable);if(isTyping)return;e.preventDefault();undo()});
+load();render();initDropbox();
+</script>
+</body>
+</html>
