@@ -1,0 +1,41 @@
+name: Build Todo v4
+
+on:
+  push:
+    branches:
+      - chatgpt/v4-productivity
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/v4-productivity
+      - name: Reconstruct app
+        run: |
+          cat .build/v4x.part01 .build/v4x.part02 .build/v4x.part03 .build/v4x.part04 .build/v4x.part05 .build/v4x.part06 .build/v4x.part07 .build/v4x.part08 | base64 -d > /tmp/index.xz
+          xz -dc /tmp/index.xz > index.html
+      - name: Verify JavaScript and version
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s = Path('index.html').read_text()
+          assert 'const APP_VERSION="4.0.0"' in s
+          assert 'Follow-up' in s
+          assert 'selftest' in s
+          Path('/tmp/todo.js').write_text(s[s.index('<script>')+8:s.rindex('</script>')])
+          PY
+          node --check /tmp/todo.js
+      - name: Clean staging files and commit
+        run: |
+          rm -rf .build
+          rm -f .github/workflows/build-v4.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A -- index.html .build .github/workflows/build-v4.yml
+          git commit -m "Build v4.0.0 todo app [skip ci]"
+          git push origin HEAD:chatgpt/v4-productivity
