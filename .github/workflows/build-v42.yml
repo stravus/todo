@@ -15,6 +15,19 @@ jobs:
       - name: Apply v4.2 patch
         run: |
           python3 v42_patch.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('index.html'); s=p.read_text()
+          bad='devJobs:state.devJobs}))}))}'
+          good='devJobs:state.devJobs}))}'
+          assert bad in s, 'expected generated saveLocal syntax artifact'
+          s=s.replace(bad,good,1)
+          old='return hashData()+"|"+state.view+"|"+state.query+"|"+(state.inlineEditId||"")+"|"+[...state.collapsed].sort().join(",")'
+          new='return hashData()+"|"+state.view+"|"+state.query+"|"+(state.inlineEditId||"")+"|"+(state.editingId||"")+"|"+[...state.collapsed].sort().join(",")'
+          assert old in s
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
           grep -q 'const APP_VERSION="4.2.0"' index.html
           grep -q 'const DATA_VERSION=6' index.html
           grep -q 'Friction monitor aktiv' index.html
@@ -56,7 +69,6 @@ jobs:
               await self.goto('http://127.0.0.1:8765/?selftest=1');
               await self.waitForFunction(()=>document.documentElement.dataset.selftest==='pass',null,{timeout:30000});
               const summary=(await self.locator('#testSummary').textContent()).trim();
-              assert(/^\d+\/\1?/.test('')===false,'sanity');
               const m=summary.match(/^(\d+)\/(\d+) PASS$/);assert(m&&m[1]===m[2],`embedded selftest: ${summary}`);
               assert(Number(m[1])>=70,`expected expanded v4.2 suite, got ${summary}`);
               assert(selfErr.length===0,`selftest errors: ${selfErr.join(';')}`);
@@ -97,7 +109,6 @@ jobs:
               await page.getByText('Upprepade klick utan resultat',{exact:true}).waitFor({state:'visible'});
               await page.locator('[data-signalbug]').first().click();
               await page.locator('button[data-view="history"]').click();
-              await page.getByDisplayValue ? Promise.resolve() : Promise.resolve();
               assert(await page.locator('[data-backlog]').count()>=2,'friction bug not created');
               const localOnly=await page.evaluate(()=>({remote:remotePayload(),friction:JSON.parse(localStorage.getItem('doctrin-todo-friction-v1')||'{}')}));
               assert(!('friction' in localOnly.remote),'friction telemetry leaked into remote payload');
