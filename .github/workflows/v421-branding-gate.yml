@@ -1,0 +1,174 @@
+name: Todo v4.2.1 branding gate
+
+on:
+  push:
+    branches:
+      - chatgpt/logo-neutral-branding
+
+permissions:
+  contents: write
+
+jobs:
+  gate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact branding patch
+        run: |
+          python3 v421_patch.py
+          grep -q '<title>Todo</title>' index.html
+          grep -q 'class="brand-mark"' index.html
+          grep -q 'class="brand-word">Todo<' index.html
+          grep -q 'const APP_VERSION="4.2.1"' index.html
+          grep -q 'const DATA_VERSION=6' index.html
+          grep -q 'const STORAGE_KEY="doctrin-things-todo-v1"' index.html
+          ! grep -q 'Doctrin Todo' index.html
+          ! grep -q 'CAPA-251' index.html
+
+      - name: Syntax and structure checks
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          s=Path('index.html').read_text(encoding='utf-8')
+          scripts=re.findall(r'<script>(.*?)</script>',s,re.S)
+          assert len(scripts)==1
+          Path('/tmp/app.js').write_text(scripts[0],encoding='utf-8')
+          ids=re.findall(r'id="([^"]+)"',s)
+          assert len(ids)==len(set(ids)), 'duplicate HTML ids'
+          assert '<title>Todo</title>' in s
+          assert 'aria-label="Todo"' in s
+          assert 'class="brand-mark"' in s
+          assert 'Doctrin Todo' not in s
+          assert 'const DATA_VERSION=6;' in s
+          assert 'const STORAGE_KEY="doctrin-things-todo-v1";' in s
+          assert 'const DROPBOX_FILE="/todos.json";' in s
+          assert 'OPENAI_API_KEY' not in s
+          assert 'github_pat_' not in s and 'ghp_' not in s
+          print('STRUCTURE/PRIVACY PASS',len(ids),'unique IDs')
+          PY
+          node --check /tmp/app.js
+          git diff --check
+
+      - name: Install Chromium
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Functional migration and browser regression
+        run: |
+          python3 -m http.server 8765 >/tmp/http.log 2>&1 &
+          for i in {1..30}; do curl -fsS http://127.0.0.1:8765/ >/dev/null && break; sleep .5; done
+          cat > smoke.cjs <<'NODE'
+          const {chromium}=require('playwright');
+          const assert=(v,m)=>{if(!v)throw new Error(m)};
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            try{
+              const self=await browser.newPage(), selfErr=[];
+              self.on('pageerror',e=>selfErr.push(e.message));
+              await self.goto('http://127.0.0.1:8765/?selftest=1');
+              await self.waitForFunction(()=>['pass','fail'].includes(document.documentElement.dataset.selftest),null,{timeout:30000});
+              const summary=(await self.locator('#testSummary').textContent()).trim();
+              console.log('SELFTEST',summary);
+              const m=summary.match(/^(\d+)\/(\d+) PASS$/);
+              assert(await self.evaluate(()=>document.documentElement.dataset.selftest)==='pass',`embedded failures: ${summary}`);
+              assert(m&&m[1]===m[2]&&Number(m[1])>=74,`embedded suite incomplete: ${summary}`);
+              assert(selfErr.length===0,`selftest page errors: ${selfErr.join(';')}`);
+              await self.close();
+
+              const page=await browser.newPage({viewport:{width:1280,height:900}}), errs=[];
+              page.on('pageerror',e=>errs.push(e.message));
+              await page.goto('http://127.0.0.1:8765/');
+              await page.evaluate(()=>{
+                const d=new Date(),p=n=>String(n).padStart(2,'0'),today=`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`,now=new Date().toISOString();
+                localStorage.clear();
+                localStorage.setItem('doctrin-things-todo-v1',JSON.stringify({version:5,appVersion:'4.1.0',updatedAt:now,tasks:[
+                  {id:'migration-task',title:'Migration test item',notes:'',dueDate:today,tags:{next:false,followup:true,some:false,nextWeekFor:null},completed:false,completedAt:null,cleared:false,path:['Test area'],level:1,createdAt:now}
+                ],backlog:[
+                  {id:'migration-backlog',type:'improvement',title:'Migration backlog item',description:'Generic test data',selected:false,comment:'',status:'open',createdAt:now,updatedAt:now}
+                ]}));
+              });
+              await page.reload();
+              assert(await page.title()==='Todo','neutral document title');
+              assert((await page.locator('.brand-word').textContent()).trim()==='Todo','neutral visible brand');
+              assert(await page.locator('.brand-mark').isVisible(),'logo mark visible');
+              const markBox=await page.locator('.brand-mark').boundingBox();
+              assert(markBox&&markBox.width>=30&&markBox.height>=30,'logo mark dimensions');
+              assert(!(await page.locator('body').innerText()).includes('Doctrin'),'legacy brand is visible in UI');
+              assert((await page.locator('#cToday').textContent()).trim()==='1','Today count after migration');
+              await page.locator('button[data-view="today"]').click();
+              await page.getByText('Migration test item',{exact:true}).waitFor({state:'visible'});
+              const stored=await page.evaluate(()=>JSON.parse(localStorage.getItem('doctrin-things-todo-v1')));
+              assert(stored.version===6,'v5 to v6 migration');
+              assert(stored.tasks.length===1&&stored.tasks[0].title==='Migration test item','todo preserved during migration');
+              assert(stored.backlog.length===1&&stored.backlog[0].title==='Migration backlog item','backlog preserved during migration');
+              const remote=await page.evaluate(()=>remotePayload());
+              assert(remote.version===6&&remote.tasks.length===1&&remote.backlog.length===1,'Dropbox payload compatibility');
+              assert(remote.app==='Todo','new neutral payload app label');
+              assert(errs.length===0,`normal UI page errors: ${errs.join(';')}`);
+
+              const mobile=await browser.newPage({viewport:{width:390,height:844}}), mobileErr=[];
+              mobile.on('pageerror',e=>mobileErr.push(e.message));
+              await mobile.goto('http://127.0.0.1:8765/');
+              assert(await mobile.locator('.brand-mark').isVisible(),'mobile logo visible');
+              assert((await mobile.locator('.brand-word').textContent()).trim()==='Todo','mobile brand text');
+              assert(mobileErr.length===0,`mobile page errors: ${mobileErr.join(';')}`);
+              console.log('NORMAL_UI_AND_MIGRATION_GATE PASS');
+            } finally { await browser.close(); }
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+          node smoke.cjs
+
+      - name: Write test log and finalize review branch
+        run: |
+          cat > TEST_LOG_v4.2.1.md <<'EOF'
+          # Todo v4.2.1 – Test Log
+
+          **Date:** 2026-08-16
+
+          ## Scope
+          Neutral visible branding: remove the Doctrin product name, add a compact checkmark logo, and keep existing todo/Dropbox data compatible.
+
+          ## Compatibility decisions
+          - `DATA_VERSION` remains 6.
+          - Existing `doctrin-*` localStorage keys are intentionally retained so current browser data is not orphaned.
+          - Dropbox file path remains `/todos.json` and the existing OAuth configuration is unchanged.
+          - The user-visible/export payload app label changes from `Doctrin Todo` to `Todo`; task/backlog/development-job structures are unchanged.
+          - No private todo data is included in repository test fixtures; fixtures are generic synthetic records only.
+
+          ## Automated quality gate
+          - Exact patch preconditions/assertions: **PASS**
+          - JavaScript syntax (`node --check`): **PASS**
+          - HTML ID uniqueness / structure: **PASS**
+          - Private-data / credential static scan: **PASS**
+          - `git diff --check`: **PASS**
+          - Real Chromium embedded functional/regression suite: **PASS (>=74 tests, all passing)**
+          - Real Chromium v5→v6 migration: **PASS**
+          - Todo preservation during migration: **PASS**
+          - Backlog preservation during migration: **PASS**
+          - Dropbox payload structure/version compatibility: **PASS**
+          - Neutral browser title + visible brand: **PASS**
+          - New logo visible on desktop: **PASS**
+          - New logo visible at 390 px mobile viewport: **PASS**
+          - Legacy `Doctrin` name absent from visible UI: **PASS**
+          - Browser page errors in tested desktop/mobile flows: **0**
+
+          ## Existing regression coverage retained
+          The embedded suite continues to cover Today/Upcoming/Next wk, Follow-up/Sometimes, hierarchy/path editing, collapse/expand, import/export, completion/log, keyboard controls, undo/snapshots/rollback, Dropbox revision behavior, backlog/development jobs, friction monitoring and earlier-schema migration.
+
+          **Publication candidate gate: PASS.**
+          EOF
+
+          rm -f smoke.cjs
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- index.html TEST_LOG_v4.2.1.md
+          git rm -- v421_patch.py .github/workflows/v421-branding-gate.yml
+          git status --short
+          git commit -m 'Todo v4.2.1: neutral branding and logo [skip ci]'
+          git push origin HEAD:chatgpt/logo-neutral-branding
