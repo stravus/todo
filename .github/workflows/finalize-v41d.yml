@@ -1,0 +1,82 @@
+name: Finalize Todo v4.1 final gate
+
+on:
+  push:
+    branches: [chatgpt/v4.1]
+    paths: [.github/workflows/finalize-v41d.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Build exact corrected candidate
+        run: |
+          cat .staging/v41_01.b64 .staging/v41_02a.b64 .staging/v41_02b.b64 .staging/v41_03.b64 .staging/v41_04.b64 .staging/v41_05.b64 .staging/v41_06.b64 .staging/v41_07a.b64 .staging/v41_07b.b64 | base64 -d > index.html
+          echo "3581ae3d6394c83c23a234926662a32ad8585219c0cb075da4162959147a1242  index.html" | sha256sum -c -
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('index.html'); s=p.read_text()
+          for old,new in {
+            'const used=new Set(),overdue=items.filter(isOverdue);':'const used=new Set(),overdue=items.filter(t=>isOverdue(t));',
+            'group("Overdue",items.filter(isOverdue),"overdue","","overdue")+group("Today",items.filter(dueToday),"",humanDate(isoDate()),"today")':'group("Overdue",items.filter(t=>isOverdue(t)),"overdue","","overdue")+group("Today",items.filter(t=>dueToday(t)),"",humanDate(isoDate()),"today")',
+            'document.getElementById("cUpcoming").textContent=active.filter(isInUpcoming).length;':'document.getElementById("cUpcoming").textContent=active.filter(t=>isInUpcoming(t)).length;',
+            'document.getElementById("cNext").textContent=active.filter(isDueNextWeek).length;':'document.getElementById("cNext").textContent=active.filter(t=>isDueNextWeek(t)).length;',
+          }.items():
+              assert old in s; s=s.replace(old,new)
+          anchor=next(line for line in s.splitlines() if 'await test("REGRESSION: Today includes' in line)
+          extra='\n'.join([
+            'await test("REGRESSION: Today renderer shows due-today + Next wk task",()=>{const t=normalizeTask({title:"render-today-next",dueDate:isoDate(),tags:{next:true},path:["A"]});const h=renderToday([t]);assert(h.includes("render-today-next"))});',
+            'await test("REGRESSION: Upcoming renderer shows overdue task",()=>{const t=normalizeTask({title:"render-overdue",dueDate:"2020-01-01",path:["A"]});const h=renderUpcoming([t]);assert(h.includes("render-overdue"))});',
+            'await test("REGRESSION: render counters count dated upcoming/next-week tasks",()=>{const t=normalizeTask({title:"counter-next",dueDate:isoDate(weekBounds().nextMonday),path:["A"]});state.tasks=[t];state.view="open";render();assert(document.getElementById("cUpcoming").textContent==="1");assert(document.getElementById("cNext").textContent==="1")});'
+          ])
+          s=s.replace(anchor,anchor+'\n'+extra); p.write_text(s)
+          PY
+          echo "aaf8eba5034efb19906dc10ada1e6398e7b3e129b5ffa2bd673ea1f74cb5dbbd  index.html" | sha256sum -c -
+          test "$(wc -c < index.html)" -eq 73669
+          python3 - <<'PY'
+          import re
+          s=open('index.html').read(); m=re.findall(r'<script>(.*?)</script>',s,re.S); assert len(m)==1; open('/tmp/app.js','w').write(m[0])
+          PY
+          node --check /tmp/app.js
+      - name: Install Chromium
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Run real Chromium gate
+        run: |
+          python3 -m http.server 8765 >/tmp/http.log 2>&1 &
+          for i in {1..30}; do curl -fsS http://127.0.0.1:8765/ >/dev/null && break; sleep .5; done
+          cat > smoke.cjs <<'NODE'
+          const {chromium}=require('playwright'); const ok=(v,m)=>{if(!v)throw Error(m)};
+          (async()=>{const b=await chromium.launch({headless:true});try{
+            const st=await b.newPage(),se=[];st.on('pageerror',e=>se.push(e.message));await st.goto('http://127.0.0.1:8765/?selftest=1');await st.waitForFunction(()=>document.documentElement.dataset.selftest==='pass',null,{timeout:30000});const sum=(await st.locator('#testSummary').textContent()).trim();ok(sum==='54/54 PASS',sum);ok(!se.length,se.join(';'));console.log('SELFTEST',sum);await st.close();
+            const p=await b.newPage(),errs=[];p.on('pageerror',e=>errs.push(e.message));await p.goto('http://127.0.0.1:8765/');await p.evaluate(()=>{const d=new Date(),z=n=>String(n).padStart(2,'0'),fmt=x=>`${x.getFullYear()}-${z(x.getMonth()+1)}-${z(x.getDate())}`,today=fmt(d),now=new Date().toISOString(),x=new Date(d);x.setDate(x.getDate()+((8-x.getDay())%7||7));const nm=fmt(x);localStorage.clear();localStorage.setItem('doctrin-things-todo-v1',JSON.stringify({version:5,appVersion:'4.1.0',updatedAt:now,tasks:[{id:'t1',title:'Due today + next',notes:'',dueDate:today,tags:{next:true,followup:false,some:false,nextWeekFor:nm},completed:false,completedAt:null,cleared:false,path:['Alpha','Beta'],createdAt:now},{id:'t2',title:'Same path',notes:'',dueDate:'',tags:{next:false,followup:false,some:false,nextWeekFor:null},completed:false,completedAt:null,cleared:false,path:['Alpha','Beta'],createdAt:now},{id:'t3',title:'Dated next week',notes:'',dueDate:nm,tags:{next:false,followup:false,some:false,nextWeekFor:null},completed:false,completedAt:null,cleared:false,path:['Other'],createdAt:now}],backlog:[{id:'b1',type:'bug',title:'Test bug',description:'Bug description',selected:true,comment:'',status:'open',createdAt:now,updatedAt:now}]}))});await p.reload();
+            ok(Number(await p.locator('#cToday').textContent())===1,'today count');ok(Number(await p.locator('#cUpcoming').textContent())===2,'upcoming count');ok(Number(await p.locator('#cNext').textContent())===2,'next count');
+            await p.locator('button[data-view="today"]').click();await p.getByText('Due today + next',{exact:true}).waitFor({state:'visible'});
+            await p.locator('button[data-view="open"]').click();ok(await p.locator('.task').count()===3,'3 tasks');const g=p.locator('[data-collapse]').filter({hasText:'Alpha › Beta'}).first();await g.click();ok(await p.locator('.task').count()===1,'collapse');await g.click();ok(await p.locator('.task').count()===3,'expand');
+            await p.locator('.task[data-id="t1"] .path-chip').click();await p.locator('#inlinePath').fill('Gamma / Delta');await p.locator('[data-action="inline-save"]').click();await p.getByText('Gamma › Delta',{exact:true}).first().waitFor({state:'visible'});
+            await p.locator('button[data-view="history"]').click();const row=p.locator('[data-backlog="b1"]');await row.locator('[data-bfield="comment"]').fill('Implement carefully');await row.locator('[data-bfield="comment"]').press('Tab');await p.locator('#generatePromptBtn').click();const prompt=await p.locator('#promptBox').inputValue();ok(prompt.includes('[BUG] Test bug')&&prompt.includes('Implement carefully'),'prompt');
+            await p.locator('#backlogType').selectOption('improvement');await p.locator('#backlogTitle').fill('Smoke improvement');await p.locator('#backlogAddBtn').click();ok(await p.locator('input[data-bfield="title"]').evaluateAll(xs=>xs.some(x=>x.value==='Smoke improvement')),'backlog add');ok(!errs.length,errs.join(';'));console.log('NORMAL_UI_GATE PASS');
+          }finally{await b.close()}})().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+          node smoke.cjs
+      - name: Finalize branch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('TEST_LOG_v4.1.0.md'); s=p.read_text(); s=s.replace('- Automated functional/regression suite: **60/60 PASS**','- Latest local automated functional/regression suite after browser-found render fix: **63/63 PASS**')
+          s += '''\n\n## Publication-gate defect found and corrected\nA real Chromium gate found that the Today count was correct while the list rendering was empty. Date helpers accepted an optional test `base` argument but had been passed directly to `Array.filter`, so JavaScript supplied the array index as that date base. All affected callbacks are now explicit one-argument arrows. Regression tests cover Today rendering, overdue rendering and Upcoming/Next wk counters.\n\nLatest local deterministic suite: **63/63 PASS**.\n\n## GitHub Actions final browser gate\n- Exact candidate hash/size: **PASS**\n- JavaScript syntax: **PASS**\n- Embedded suite in real Chromium: **54/54 PASS**\n- Today due-date + Next wk rendering: **PASS**\n- Upcoming and Next wk dated counters: **PASS**\n- Same-path collapse/expand: **PASS**\n- Path editing: **PASS**\n- Editable backlog, implementation comment and prompt generation: **PASS**\n- Add improvement backlog item: **PASS**\n- Browser page errors in tested flows: **0**\n- Live Dropbox write: not performed to protect production data; deterministic sync tests cover serialization/revision/conflict behavior.\n\n**Final publication gate: PASS.**\n'''; p.write_text(s)
+          PY
+          git rm -r -- .staging
+          git rm -- .github/workflows/diagnose-v41.yml .github/workflows/publish-v41.yml .github/workflows/finalize-v41.yml .github/workflows/finalize-v41b.yml .github/workflows/finalize-v41c.yml .github/workflows/finalize-v41d.yml .github/workflows/diagnose-normal-load-v41.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- index.html TEST_LOG_v4.1.0.md
+          git commit -m "[v41-final] Publish todo v4.1.0" -m "Passed 63/63 local tests, 54/54 embedded Chromium tests and normal UI browser gates."
+          git push
