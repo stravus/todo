@@ -17,18 +17,13 @@ jobs:
         run: |
           npm install --no-save playwright@1.55.0
           npx playwright install --with-deps chromium
-      - name: Diagnose load
+      - name: Diagnose add-row visibility
         run: |
           python3 -m http.server 8765 >/tmp/http.log 2>&1 &
           for i in {1..30}; do curl -fsS http://127.0.0.1:8765/ >/dev/null && break; sleep .5; done
           cat > diag.cjs <<'NODE'
           const {chromium}=require('playwright');
-          (async()=>{const b=await chromium.launch({headless:true});try{const p=await b.newPage();p.on('console',m=>console.log('CONSOLE',m.type(),m.text()));p.on('pageerror',e=>console.log('PAGEERROR',e.message));await p.goto('http://127.0.0.1:8765/');
-          console.log('INITIAL',await p.evaluate(()=>({date:new Date().toString(),iso:new Date().toISOString(),keys:Object.keys(localStorage),body:document.body.innerText.slice(0,500)})));
-          const seeded=await p.evaluate(()=>{const d=new Date(),pad=n=>String(n).padStart(2,'0'),today=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`,now=new Date().toISOString();const payload={version:5,appVersion:'4.1.0',updatedAt:now,tasks:[{id:'t1',title:'Due today + next',notes:'',dueDate:today,tags:{next:true,followup:false,some:false,nextWeekFor:today},completed:false,completedAt:null,cleared:false,path:['Alpha','Beta'],level:2,createdAt:now},{id:'t2',title:'Same path',notes:'',dueDate:'',tags:{next:false,followup:false,some:false,nextWeekFor:null},completed:false,completedAt:null,cleared:false,path:['Alpha','Beta'],level:2,createdAt:now}],backlog:[{id:'b1',type:'bug',title:'Test bug',description:'Bug description',selected:true,comment:'',status:'open',createdAt:now,updatedAt:now}]};localStorage.clear();localStorage.setItem('doctrin-things-todo-v1',JSON.stringify(payload));return {today,raw:localStorage.getItem('doctrin-things-todo-v1')}});console.log('SEEDED',seeded);
-          await p.reload({waitUntil:'domcontentloaded'});await p.waitForTimeout(1000);
-          console.log('AFTER_RELOAD',await p.evaluate(()=>({date:new Date().toString(),raw:localStorage.getItem('doctrin-things-todo-v1'),week:localStorage.getItem('doctrin-todo-week-anchor-v1'),connected:localStorage.getItem('doctrin-todo-dropbox-connected-v1'),countToday:document.querySelector('#cToday')?.textContent,countOpen:document.querySelector('#cOpen')?.textContent,activeView:document.querySelector('#nav button.active')?.dataset.view,body:document.body.innerText.slice(0,1500)})));
-          await p.locator('button[data-view="today"]').click();await p.waitForTimeout(300);console.log('AFTER_TODAY',await p.evaluate(()=>({countToday:document.querySelector('#cToday')?.textContent,content:document.querySelector('#content')?.innerText,body:document.body.innerText.slice(0,1500)})));
-          }finally{await b.close()}})().catch(e=>{console.error(e);process.exit(1)});
+          const info=async(p,label)=>console.log(label,await p.evaluate(()=>{const el=document.querySelector('#newPath'),r=el?.getBoundingClientRect(),cs=el?getComputedStyle(el):null;return {view:document.querySelector('#nav button.active')?.dataset.view,addDisplay:getComputedStyle(document.querySelector('#addRow')).display,path:{exists:!!el,display:cs?.display,visibility:cs?.visibility,opacity:cs?.opacity,w:r?.width,h:r?.height,x:r?.x,y:r?.y,value:el?.value},tasks:document.querySelectorAll('.task').length,body:document.body.innerText.slice(0,900)}}));
+          (async()=>{const b=await chromium.launch({headless:true});try{const p=await b.newPage();p.on('pageerror',e=>console.log('PAGEERROR',e.message));await p.goto('http://127.0.0.1:8765/');await p.evaluate(()=>localStorage.clear());await p.reload();await info(p,'BEFORE');const d=await p.evaluate(()=>{const x=new Date(),q=n=>String(n).padStart(2,'0');return `${x.getFullYear()}-${q(x.getMonth()+1)}-${q(x.getDate())}`});await p.locator('#newTitle').fill('Due today + next');await p.locator('#newDate').fill(d);await p.locator('#newPath').fill('Alpha / Beta');await p.locator('#newNext').click();await p.locator('#addBtn').click();await p.waitForTimeout(300);await info(p,'AFTER_FIRST');}finally{await b.close()}})().catch(e=>{console.error(e);process.exit(1)});
           NODE
           node diag.cjs
