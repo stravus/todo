@@ -1,0 +1,152 @@
+name: Final v4.1 layout gate
+on:
+  push:
+    branches: [chatgpt/v4.1]
+    paths: [.github/workflows/final-layout-v41.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Verify exact branch input and apply layout fix
+        run: |
+          test "$(git hash-object index.html)" = "1b2fa36c2a88339aa4f0e3553c6905878d949b47"
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('index.html'); s=p.read_text()
+          old='.addrow{display:grid;grid-template-columns:minmax(220px,1fr) 145px minmax(160px,.55fr) auto auto auto auto;gap:7px;background:#fff;border:1px solid var(--line);border-radius:13px;padding:8px;margin-bottom:22px;box-shadow:0 2px 10px rgba(0,0,0,.02)}.addrow input{border:0;outline:0;padding:6px 8px;min-width:0}'
+          new='.addrow{display:flex;flex-wrap:wrap;gap:7px;background:#fff;border:1px solid var(--line);border-radius:13px;padding:8px;margin-bottom:22px;box-shadow:0 2px 10px rgba(0,0,0,.02)}.addrow input{border:0;outline:0;padding:6px 8px;min-width:0}.addrow #newTitle{flex:1 1 260px}.addrow input[type=date]{flex:0 0 145px}.addrow .path-new{flex:1 1 190px;min-width:170px}'
+          assert s.count(old)==1, f'Expected exactly one pre-fix addrow CSS, found {s.count(old)}'
+          s=s.replace(old,new,1)
+          old2='document.getElementById("addRow").style.display=["log","history"].includes(state.view)?"none":"grid"'
+          new2='document.getElementById("addRow").style.display=["log","history"].includes(state.view)?"none":"flex"'
+          assert s.count(old2)==1, f'Expected exactly one pre-fix addRow render mode, found {s.count(old2)}'
+          s=s.replace(old2,new2,1)
+          p.write_text(s)
+          PY
+          git diff --check
+          grep -q '.addrow .path-new{flex:1 1 190px;min-width:170px}' index.html
+          grep -q 'style.display=\["log","history"\].includes(state.view)?"none":"flex"' index.html
+          FINAL_SHA=$(sha256sum index.html | awk '{print $1}')
+          FINAL_BYTES=$(wc -c < index.html)
+          echo "FINAL_SHA=$FINAL_SHA" >> "$GITHUB_ENV"
+          echo "FINAL_BYTES=$FINAL_BYTES" >> "$GITHUB_ENV"
+          echo "Post-fix SHA-256: $FINAL_SHA; bytes: $FINAL_BYTES"
+      - name: JavaScript syntax
+        run: |
+          python3 - <<'PY'
+          import re
+          s=open('index.html',encoding='utf-8').read(); m=re.findall(r'<script>(.*?)</script>',s,re.S); assert len(m)==1
+          open('/tmp/app.js','w',encoding='utf-8').write(m[0])
+          PY
+          node --check /tmp/app.js
+      - name: Install Chromium
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Run embedded and real UI regression
+        run: |
+          python3 -m http.server 8765 >/tmp/http.log 2>&1 &
+          for i in {1..30}; do curl -fsS http://127.0.0.1:8765/ >/dev/null && break; sleep .5; done
+          cat > smoke.cjs <<'NODE'
+          const {chromium}=require('playwright');
+          const assert=(v,m)=>{if(!v)throw new Error(m)};
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            try{
+              const self=await browser.newPage(); const selfErr=[]; self.on('pageerror',e=>selfErr.push(e.message));
+              await self.goto('http://127.0.0.1:8765/?selftest=1');
+              await self.waitForFunction(()=>document.documentElement.dataset.selftest==='pass',null,{timeout:30000});
+              const summary=(await self.locator('#testSummary').textContent()).trim();
+              assert(summary==='54/54 PASS',`embedded suite: ${summary}`);
+              assert(selfErr.length===0,`selftest errors: ${selfErr.join('; ')}`);
+              console.log('SELFTEST',summary); await self.close();
+
+              const page=await browser.newPage(); const errs=[]; page.on('pageerror',e=>errs.push(e.message));
+              await page.goto('http://127.0.0.1:8765/'); await page.evaluate(()=>localStorage.clear()); await page.reload();
+              const today=await page.evaluate(()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`});
+
+              await page.locator('#newTitle').fill('Due today + next');
+              await page.locator('#newDate').fill(today);
+              await page.locator('#newPath').fill('Alpha / Beta');
+              await page.locator('#newNext').click();
+              await page.locator('#addBtn').click();
+              const pathBox=await page.locator('#newPath').boundingBox();
+              assert(pathBox && pathBox.width>=160 && pathBox.height>0,`newPath collapsed: ${JSON.stringify(pathBox)}`);
+
+              await page.locator('#newTitle').fill('Same path');
+              await page.locator('#newPath').fill('Alpha / Beta');
+              await page.locator('#addBtn').click();
+
+              await page.locator('button[data-view="today"]').click();
+              await page.getByText('Due today + next',{exact:true}).waitFor({state:'visible'});
+              assert(Number(await page.locator('#cToday').textContent())>=1,'Today count missing due-today + Next wk task');
+
+              await page.locator('button[data-view="open"]').click();
+              assert(await page.locator('.task').count()===2,'expected two tasks');
+              const group=page.locator('[data-collapse]').filter({hasText:'Alpha › Beta'}).first();
+              await group.click(); assert(await page.locator('.task').count()===0,'collapse failed');
+              await group.click(); assert(await page.locator('.task').count()===2,'expand failed');
+
+              await page.locator('.task').filter({hasText:'Due today + next'}).locator('.path-chip').click();
+              await page.locator('#inlinePath').fill('Gamma / Delta');
+              await page.locator('[data-action="inline-save"]').click();
+              await page.getByText('Gamma › Delta',{exact:true}).first().waitFor({state:'visible'});
+
+              await page.locator('button[data-view="history"]').click();
+              await page.locator('#backlogType').selectOption('bug');
+              await page.locator('#backlogTitle').fill('Test bug');
+              await page.locator('#backlogAddBtn').click();
+              let row=page.locator('.backlog-row').filter({has:page.locator('input[data-bfield="title"][value="Test bug"]')});
+              await row.locator('[data-bfield="description"]').fill('Bug description'); await row.locator('[data-bfield="description"]').press('Tab');
+              row=page.locator('.backlog-row').filter({has:page.locator('input[data-bfield="title"][value="Test bug"]')});
+              await row.locator('[data-bfield="comment"]').fill('Implement carefully'); await row.locator('[data-bfield="comment"]').press('Tab');
+              row=page.locator('.backlog-row').filter({has:page.locator('input[data-bfield="title"][value="Test bug"]')});
+              await row.locator('[data-bfield="selected"]').check();
+              await page.locator('#generatePromptBtn').click();
+              const prompt=await page.locator('#promptBox').inputValue();
+              assert(prompt.includes('[BUG] Test bug')&&prompt.includes('Bug description')&&prompt.includes('Implement carefully'),'prompt content incomplete');
+
+              await page.locator('#backlogType').selectOption('improvement');
+              await page.locator('#backlogTitle').fill('Smoke improvement');
+              await page.locator('#backlogAddBtn').click();
+              await page.getByDisplayValue('Smoke improvement').waitFor({state:'visible'});
+              assert(errs.length===0,`page errors: ${errs.join('; ')}`);
+              console.log('FINAL_UI_GATE PASS');
+            }finally{await browser.close()}
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+          node smoke.cjs
+      - name: Commit only the code that passed
+        run: |
+          cat >> TEST_LOG_v4.1.0.md <<EOF
+
+          ## Final code-equals-tested-code layout gate
+          A review after the earlier green browser run found that its temporary add-row layout fix had not been persisted to the branch. Publication remained blocked. This final gate applies the fix directly to the branch file, tests that exact file, then commits the same bytes.
+
+          - Input Git blob verified: **PASS** (\`1b2fa36c…\`)
+          - Post-fix SHA-256: **$FINAL_SHA**
+          - Post-fix byte length: **$FINAL_BYTES bytes**
+          - JavaScript syntax: **PASS**
+          - Embedded regression suite in real Chromium: **54/54 PASS**
+          - Real UI: new-todo path field remains >=160 px wide after first add: **PASS**
+          - Real UI: due-today + \`Next wk\` appears in Today: **PASS**
+          - Real UI: exact-path collapse / expand: **PASS**
+          - Real UI: path chip editing: **PASS**
+          - Real UI: Bug backlog edit + implementation comment + selected prompt generation: **PASS**
+          - Real UI: add improvement backlog item: **PASS**
+          - Browser page errors: **0**
+          - Live Dropbox write: **not performed** to protect production data.
+
+          **Final code-equals-tested-code gate: PASS.**
+          EOF
+          git rm -- .github/workflows/final-layout-v41.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- index.html TEST_LOG_v4.1.0.md
+          git commit -m "Persist tested v4.1 add-row layout fix"
+          git push
