@@ -8,7 +8,7 @@
 - JavaScript syntax (`node --check`): **PASS**
 - HTML parse and unique IDs: **PASS**
 - Static security/config assertions: **6/6 PASS**
-- Automated functional/regression suite: **60/60 PASS**
+- Latest local automated functional/regression suite after browser-found render fix: **63/63 PASS**
 - Legacy v3 seed migration: **201/201 tasks imported**; nested paths preserved; backlog preserved
 - Dropbox API behavior: revision-aware update and 409 handling tested with deterministic mocks
 - Live Dropbox write was intentionally not performed during automated testing to avoid touching user production data.
@@ -112,3 +112,24 @@ For publication, the recommended final gate is a temporary GitHub Actions browse
 ## Result
 
 **Pre-publication local verification: PASS.** No failing functional, regression, migration, syntax, structure, or static security checks remain.
+
+
+## Publication-gate defect found and corrected
+A real Chromium gate found that the Today count was correct while the list rendering was empty. Date helpers accepted an optional test `base` argument but had been passed directly to `Array.filter`, so JavaScript supplied the array index as that date base. All affected callbacks are now explicit one-argument arrows. Regression tests cover Today rendering, overdue rendering and Upcoming/Next wk counters.
+
+Latest local deterministic suite: **63/63 PASS**.
+
+## GitHub Actions final browser gate
+- Exact candidate hash/size: **PASS**
+- JavaScript syntax: **PASS**
+- Embedded suite in real Chromium: **54/54 PASS**
+- Today due-date + Next wk rendering: **PASS**
+- Upcoming and Next wk dated counters: **PASS**
+- Same-path collapse/expand: **PASS**
+- Path editing: **PASS**
+- Editable backlog, implementation comment and prompt generation: **PASS**
+- Add improvement backlog item: **PASS**
+- Browser page errors in tested flows: **0**
+- Live Dropbox write: not performed to protect production data; deterministic sync tests cover serialization/revision/conflict behavior.
+
+**Final publication gate: PASS.**
