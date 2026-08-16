@@ -1,0 +1,20 @@
+name: Diagnose v4.1 staging
+on:
+  push:
+    branches:
+      - chatgpt/v4.1
+    paths:
+      - .github/workflows/diagnose-v41.yml
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check staged chunks
+        run: |
+          for f in .staging/v41_*.b64; do
+            echo "--- $f ---"
+            wc -c "$f"
+            sha256sum "$f"
+            if base64 -d "$f" >/dev/null; then echo "BASE64_OK"; else echo "BASE64_FAIL"; fi
+          done
