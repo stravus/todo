@@ -1,0 +1,35 @@
+name: Persist v4.1 Today diagnosis
+on:
+  push:
+    branches: [chatgpt/v4.1-hotfix]
+    paths: [.github/workflows/diag-persist-v41.yml]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Install Chromium
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Diagnose and persist result
+        run: |
+          python3 -m http.server 8765 >/tmp/http.log 2>&1 &
+          for i in {1..30}; do curl -fsS http://127.0.0.1:8765/ >/dev/null && break; sleep .5; done
+          cat > diag.cjs <<'NODE'
+          const {chromium}=require('playwright'),fs=require('fs');
+          (async()=>{const b=await chromium.launch({headless:true});let out={};try{const p=await b.newPage();const errs=[];p.on('pageerror',e=>errs.push(e.message));await p.goto('http://127.0.0.1:8765/');await p.evaluate(()=>localStorage.clear());await p.reload();const today=await p.evaluate(()=>{const d=new Date(),q=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${q(d.getMonth()+1)}-${q(d.getDate())}`});await p.locator('#newTitle').fill('Due today + next');await p.locator('#newDate').fill(today);await p.locator('#newPath').fill('Alpha / Beta');await p.locator('#newNext').click();const before=await p.evaluate(()=>({title:newTitle.value,date:newDate.value,path:newPath.value,next:newNext.classList.contains('on')}));await p.locator('#addBtn').click();await p.waitForTimeout(150);const afterAdd=await p.evaluate(()=>({stored:JSON.parse(localStorage.getItem('doctrin-things-todo-v1')),cToday:cToday.textContent,view:document.querySelector('#nav button.active')?.dataset.view,content:content.innerText}));await p.locator('button[data-view="today"]').click();await p.waitForTimeout(150);const afterToday=await p.evaluate(()=>({cToday:cToday.textContent,view:document.querySelector('#nav button.active')?.dataset.view,content:content.innerText,html:content.innerHTML.slice(0,1000)}));out={today,before,afterAdd,afterToday,errors:errs};}catch(e){out.error=e.stack||String(e)}finally{await b.close();fs.writeFileSync('DIAG_V41.json',JSON.stringify(out,null,2))}})();
+          NODE
+          node diag.cjs
+      - name: Commit diagnostic result
+        run: |
+          git rm -- .github/workflows/diag-persist-v41.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- DIAG_V41.json
+          git commit -m "Persist v4.1 Today diagnostic result"
+          git push
