@@ -50,7 +50,7 @@ jobs:
         run: |
           python3 -m http.server 8765 >/tmp/http.log 2>&1 &
           for i in {1..30}; do curl -fsS http://127.0.0.1:8765/ >/dev/null && break; sleep .5; done
-          cat > /tmp/smoke.cjs <<'NODE'
+          cat > smoke.cjs <<'NODE'
           const {chromium}=require('playwright');
           const assert=(v,m)=>{if(!v)throw new Error(m)};
           (async()=>{
@@ -123,7 +123,7 @@ jobs:
             } finally { await browser.close(); }
           })().catch(e=>{console.error(e);process.exit(1)});
           NODE
-          node /tmp/smoke.cjs
+          node smoke.cjs
       - name: Finalize tested candidate
         run: |
           cat > TEST_LOG_v4.2.0.md <<'EOF'
@@ -174,7 +174,7 @@ jobs:
 
           **Publication candidate gate: PASS.**
           EOF
-          rm -f v42_patch.py v42_harden.py .github/workflows/build-v42.yml .github/workflows/final-v42.yml
+          rm -f v42_patch.py v42_harden.py smoke.cjs .github/workflows/build-v42.yml .github/workflows/final-v42.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
