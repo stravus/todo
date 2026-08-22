@@ -23,5 +23,28 @@ Seven workflow improvements: safer sync conflicts, a 14-day weekly schedule, tod
 - Todo comments sync as task data and may contain text plus image attachments.
 - “Rensa avklarade” clears every completed, uncleared todo regardless of the active view.
 
-## Automated gate
-Pending on the review branch. The gate runs syntax/static/privacy checks, the unchanged embedded core regression suite, legacy feature migration, Inbox, stable completion order, global clear, 14-day week rendering, real browser drag-and-drop, image-comment persistence, conflict merge logic, old-version compatibility blocking, desktop/mobile rendering and page-error checks.
+## Automated quality gate
+GitHub Actions run `32563111768`: **PASS**.
+
+- Static syntax, compatibility and privacy checks: **PASS**
+- Pure version-shell compatibility tests: **PASS**
+- Existing embedded regression suite: **74/74 PASS**
+- Legacy schema-6 / feature-0 → feature-1 migration: **PASS**
+- Inbox quick-add and rendering: **PASS**
+- Completed task retains manual position: **PASS**
+- Global clear-completed across hidden views: **PASS**
+- 14-day week rendering: **PASS**
+- Real browser drag from one day to another: **PASS**
+- Real browser drag from week view to Inbox: **PASS**
+- Todo comment with image attachment persistence and render: **PASS**
+- Dropbox payload retains comment/image data and `featureVersion`: **PASS**
+- Conflict merge behavior: **PASS**
+- Historical feature-0 restore blocked after feature-1 migration: **PASS**
+- Mobile 390 px week view + version manager: **PASS**
+- Browser page errors in tested flows: **0**
+
+The first two candidate runs failed only in the release gate itself (whitespace lint, then an ambiguous Playwright selector). Those gate issues were corrected without changing the requested behavior. Run `32563111768` tested the final product-code candidate and completed successfully with `V440_BROWSER_PASS 74/74 PASS errors 0`.
+
+The temporary PR-only Actions workflow is removed before release; removal does not change product code.
+
+**Publication candidate gate: PASS.**
