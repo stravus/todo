@@ -48,4 +48,3 @@ closeDrawer=function(saveChanges=true){const t=findTask(state.editingId);if(t&&s
 
 function clearCompletedGlobal(){const a=state.tasks.filter(t=>t.completed&&!t.cleared);if(!a.length){notice("Inga avklarade att rensa");return}pushUndo("clear all completed");a.forEach(t=>{t.cleared=true;touchTask(t)});save();render();notice(`${a.length} avklarade rensade i alla vyer`)}
 clearCompleted=clearCompletedGlobal;
-

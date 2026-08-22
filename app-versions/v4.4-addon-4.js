@@ -11,4 +11,3 @@ async function mergeConflict(){if(!syncState.conflictLocal||!syncState.conflictR
 
 const corePullDropbox=pullDropbox;
 pullDropbox=async function(){await corePullDropbox();updateConflictSummary()}
-

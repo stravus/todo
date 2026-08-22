@@ -12,4 +12,3 @@ function renderWeek(){const dates=weekDates(),today=isoDate(),weeks=[dates.slice
 
 const coreHistoryHtml=historyHtml;
 historyHtml=function(){let h=coreHistoryHtml();h=h.replace('<h2>Versionshistorik</h2>','<h2>Versionshistorik</h2><div class="version-item"><div class="item-title">v4.4.0 <span class="pill done">Current</span></div><div class="item-copy">2026-08-22 · Inbox, 14-dagars veckoschema, kommentarer med bilder, stabil ordning/drag-and-drop, global rensning och förbättrad synkkonflikthantering.</div></div>');h=h.replace('v4.2.1 <span class="pill done">Current</span>','v4.2.1 <span class="pill">Core</span>');return h}
-
