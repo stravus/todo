@@ -1,0 +1,206 @@
+name: Todo v4.3.0 app-version restore gate
+
+on:
+  push:
+    branches: [chatgpt/app-version-restore]
+
+permissions:
+  contents: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build v4.3.0 and immutable app snapshots
+        run: |
+          python3 tools/patch_v430.py
+          mkdir -p app-versions
+          git show 6b39f8d590c30b55163bf16638a527034a3e2879:index.html > app-versions/v4.2.1.html
+          git show 9812327ff23a2baf76f25749a0a69ab73ca47a24:index.html > app-versions/v4.2.0.html
+          cp index.html app-versions/v4.3.0.html
+          grep -q 'const APP_VERSION="4.2.1"' app-versions/v4.2.1.html
+          grep -q 'const APP_VERSION="4.2.0"' app-versions/v4.2.0.html
+          grep -q 'const APP_VERSION="4.3.0"' app-versions/v4.3.0.html
+          grep -q 'const DATA_VERSION=6;' app-versions/v4.2.1.html
+          grep -q 'const DATA_VERSION=6;' app-versions/v4.2.0.html
+          grep -q 'const DATA_VERSION=6;' app-versions/v4.3.0.html
+
+      - name: Syntax, structure, compatibility and privacy checks
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('index.html').read_text()
+          scripts=re.findall(r'<script>(.*?)</script>',s,re.S)
+          assert len(scripts)==1, len(scripts)
+          Path('/tmp/app.js').write_text(scripts[0])
+          assert s.count('id="appRoot"')==1
+          assert 'const APP_VERSION="4.3.0";' in s
+          assert 'const DATA_VERSION=6;' in s
+          assert 'const STORAGE_KEY="doctrin-things-todo-v1";' in s
+          assert 'const DROPBOX_FILE="/todos.json";' in s
+          assert 'Verktygssnapshots' in s
+          assert 'todo-app-version-pin-v1' in s
+          assert 'app-versions/v4.2.1.html' in s
+          assert 'app-versions/v4.2.0.html' in s
+          assert 'app-versions/v4.3.0.html' in s
+          assert 'INITIAL_MARKDOWN' not in s or 'INITIAL_MARKDOWN=""' in s or "INITIAL_MARKDOWN = \"\"" in s
+          for bad in ['sk-live-','github_pat_','ghp_']:
+              assert bad not in s
+          print('structure/privacy PASS')
+          PY
+          node --check /tmp/app.js
+          git diff --check
+
+      - name: Install Chromium test runtime
+        run: |
+          mkdir -p /tmp/todo-browser
+          cd /tmp/todo-browser
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0 >/dev/null 2>&1
+          npx playwright install --with-deps chromium >/dev/null 2>&1
+
+      - name: Functional, migration and real-browser regression
+        run: |
+          python3 -m http.server 8000 >/tmp/todo-http.log 2>&1 &
+          echo $! >/tmp/todo-http.pid
+          sleep 1
+          cat >/tmp/todo-browser/test.js <<'JS'
+          const { chromium } = require('/tmp/todo-browser/node_modules/playwright');
+          const fs = require('fs');
+          const base='http://127.0.0.1:8000/';
+          const assert=(v,m)=>{if(!v)throw new Error(m)};
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            const errors=[];
+            const context=await browser.newContext();
+            const page=await context.newPage();
+            page.on('pageerror',e=>errors.push(String(e)));
+            await page.goto(base+'?selftest=1',{waitUntil:'networkidle'});
+            const summary=(await page.locator('#testSummary').textContent()).trim();
+            console.log('Embedded:',summary);
+            assert(/^\d+\/\d+ PASS$/.test(summary),'embedded regression failed: '+summary);
+            fs.writeFileSync('/tmp/selftest.txt',summary);
+
+            const p=await context.newPage();
+            p.on('pageerror',e=>errors.push(String(e)));
+            await p.goto(base,{waitUntil:'domcontentloaded'});
+            const seed={version:6,appVersion:'4.2.1',updatedAt:'2026-08-22T06:00:00.000Z',tasks:[{id:'synthetic-1',title:'Synthetic task',notes:'',dueDate:'',tags:{next:false,followup:false,some:false,nextWeekFor:null},completed:false,completedAt:null,cleared:false,path:['Synthetic'],level:1,createdAt:'2026-08-22T06:00:00.000Z'}],backlog:[{id:'synthetic-b1',type:'improvement',title:'Synthetic improvement',description:'generic fixture',selected:false,comment:'',status:'open',createdAt:'2026-08-22T06:00:00.000Z',updatedAt:'2026-08-22T06:00:00.000Z'}],devJobs:[{id:'synthetic-j1',createdAt:'2026-08-22T06:00:00.000Z',updatedAt:'2026-08-22T06:00:00.000Z',status:'ready',backlogIds:['synthetic-b1'],prompt:'generic prompt',note:''}]};
+            await p.evaluate(seed=>localStorage.setItem('doctrin-things-todo-v1',JSON.stringify(seed)),seed);
+            await p.reload({waitUntil:'domcontentloaded'});
+            const dataShape=()=>p.evaluate(()=>{const x=JSON.parse(localStorage.getItem('doctrin-things-todo-v1'));return JSON.stringify({tasks:x.tasks,backlog:x.backlog,devJobs:x.devJobs})});
+            const before=await dataShape();
+            await p.getByRole('button',{name:/Backlog & historik/}).click();
+            await p.getByText('Verktygssnapshots').waitFor();
+            assert(await p.locator('[data-appshell="4.3.0"]').count()===1,'current shell absent');
+            assert(await p.locator('[data-appshell="4.2.1"]').count()===1,'4.2.1 shell absent');
+            assert(await p.locator('[data-appshell="4.2.0"]').count()===1,'4.2.0 shell absent');
+
+            await p.locator('[data-apprestore="4.2.1"]').click();
+            await p.locator('#appVersionPinBanner').waitFor({timeout:10000});
+            assert((await p.locator('#appVersionPinBanner').textContent()).includes('v4.2.1'),'v4.2.1 not restored');
+            assert((await dataShape())===before,'data changed when restoring 4.2.1 shell');
+            await p.locator('#appVersionPinBanner button').click();
+            await p.locator('#viewTitle').waitFor({timeout:10000});
+            await p.getByRole('button',{name:/Backlog & historik/}).click();
+            await p.getByText('Verktygssnapshots').waitFor();
+            assert((await dataShape())===before,'data changed returning to latest');
+
+            await p.locator('[data-apprestore="4.2.0"]').click();
+            await p.locator('#appVersionPinBanner').waitFor({timeout:10000});
+            assert((await p.locator('#appVersionPinBanner').textContent()).includes('v4.2.0'),'v4.2.0 not restored');
+            assert((await dataShape())===before,'data changed when restoring 4.2.0 shell');
+            await p.locator('#appVersionPinBanner button').click();
+            await p.locator('#viewTitle').waitFor({timeout:10000});
+            assert((await dataShape())===before,'data changed after second return to latest');
+
+            const migrate=await browser.newContext();
+            const m=await migrate.newPage();
+            m.on('pageerror',e=>errors.push(String(e)));
+            await m.goto(base,{waitUntil:'domcontentloaded'});
+            const old={version:5,appVersion:'4.1.0',updatedAt:'2026-08-01T00:00:00.000Z',tasks:[{id:'m1',title:'Migration fixture',notes:'',dueDate:'',tags:{next:false,followup:false,some:false,nextWeekFor:null},completed:false,completedAt:null,cleared:false,path:[],level:0,createdAt:'2026-08-01T00:00:00.000Z'}],backlog:[{id:'mb1',type:'bug',title:'Migration backlog',description:'generic',selected:false,comment:'',status:'open',createdAt:'2026-08-01T00:00:00.000Z',updatedAt:'2026-08-01T00:00:00.000Z'}]};
+            await m.evaluate(old=>localStorage.setItem('doctrin-things-todo-v1',JSON.stringify(old)),old);
+            await m.reload({waitUntil:'domcontentloaded'});
+            const migrated=await m.evaluate(()=>JSON.parse(localStorage.getItem('doctrin-things-todo-v1')));
+            assert(migrated.tasks.some(x=>x.id==='m1'),'migration lost todo');
+            assert(migrated.backlog.some(x=>x.id==='mb1'),'migration lost backlog');
+            assert(Array.isArray(migrated.devJobs),'migration did not initialize devJobs');
+            await migrate.close();
+
+            const mobile=await browser.newContext({viewport:{width:390,height:844}});
+            const mp=await mobile.newPage();
+            mp.on('pageerror',e=>errors.push(String(e)));
+            await mp.goto(base,{waitUntil:'domcontentloaded'});
+            await mp.getByRole('button',{name:/Backlog & historik/}).click();
+            await mp.getByText('Verktygssnapshots').waitFor();
+            assert(await mp.locator('[data-appshell="4.2.1"]').isVisible(),'mobile app snapshot UI not visible');
+            await mobile.close();
+
+            assert(errors.length===0,'browser page errors: '+errors.join(' | '));
+            fs.writeFileSync('/tmp/browser-errors.txt',String(errors.length));
+            await browser.close();
+            console.log('Browser workflow PASS; page errors:',errors.length);
+          })().catch(e=>{console.error(e);process.exit(1)});
+          JS
+          node /tmp/todo-browser/test.js
+          kill $(cat /tmp/todo-http.pid) || true
+
+      - name: Write test log and finalize review branch
+        run: |
+          SUMMARY=$(cat /tmp/selftest.txt)
+          ERRORS=$(cat /tmp/browser-errors.txt)
+          cat > TEST_LOG_v4.3.0.md <<EOF
+          # Todo v4.3.0 – Test Log
+
+          **Date:** 2026-08-22
+
+          ## Scope
+          Add tool-version snapshots/restore that can switch the app shell without rolling back or replacing todo, backlog, development-job or Dropbox data.
+
+          ## Design / compatibility
+          - DATA_VERSION remains 6.
+          - Existing localStorage and Dropbox keys/paths are unchanged.
+          - App-version pin is local-only (`todo-app-version-pin-v1`) and is not included in Dropbox payloads.
+          - Immutable public code snapshots are stored under `app-versions/`; they contain application code only, never private todo data.
+          - Write-capable restore is allowed only when the snapshot DATA_VERSION equals the current DATA_VERSION.
+          - v4.2.0, v4.2.1 and v4.3.0 all use data schema 6 and are therefore compatible.
+
+          ## Automated quality gate
+          - Patch precondition/assertion checks: **PASS**
+          - JavaScript syntax (`node --check`): **PASS**
+          - HTML/application structure checks: **PASS**
+          - Credential/private-data static checks: **PASS**
+          - `git diff --check`: **PASS**
+          - Embedded functional/regression suite in real Chromium: **$SUMMARY**
+          - v5→v6 migration with todo preservation: **PASS**
+          - v5→v6 migration with backlog preservation: **PASS**
+          - Development jobs initialized/preserved through migration: **PASS**
+          - Restore v4.3.0 → v4.2.1: **PASS**
+          - Return v4.2.1 → latest: **PASS**
+          - Restore v4.3.0 → v4.2.0: **PASS**
+          - Return v4.2.0 → latest: **PASS**
+          - Todo/backlog/dev-job data byte-equivalent before/after both shell restores: **PASS**
+          - App-version pin excluded from Dropbox payload: **PASS** (embedded regression)
+          - Incompatible data-schema restore blocked: **PASS** (embedded regression)
+          - Mobile 390px app-version snapshot UI: **PASS**
+          - Browser page errors across tested flows: **$ERRORS**
+
+          ## Regression coverage retained
+          Existing tests continue to cover Today/Upcoming/Next wk, Follow-up/Sometimes, hierarchy/path editing, collapse/expand, import/export, completion/log, keyboard controls, undo, data snapshots/rollback, Dropbox revision behavior, backlog/development jobs, friction monitoring and earlier-schema migration.
+
+          **Publication candidate gate: PASS.**
+          EOF
+
+          rm -f tools/patch_v430.py .github/workflows/v430-app-shell-gate.yml
+          rmdir tools 2>/dev/null || true
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- index.html TEST_LOG_v4.3.0.md app-versions/v4.2.0.html app-versions/v4.2.1.html app-versions/v4.3.0.html
+          git add -u -- tools/patch_v430.py .github/workflows/v430-app-shell-gate.yml
+          git status --short
+          git commit -m 'Todo v4.3.0: app-version snapshots and restore [skip ci]'
+          git push origin HEAD:chatgpt/app-version-restore
