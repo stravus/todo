@@ -28,4 +28,18 @@ Tool-version snapshots/restore: switch the application code to a compatible earl
 - Browser page errors in local shell tests: **0**
 
 ## PR Chromium gate
-Pending on the review branch. The PR workflow runs the unchanged v4.2.1 embedded regression suite, a fresh v5→v6 migration, actual v4.3→v4.2.0/v4.2.1 tool restores, semantic data-preservation checks, mobile rendering and page-error checks.
+GitHub Actions run `32559045490`: **PASS**.
+- Static, syntax, snapshot and privacy checks: **PASS**
+- Pure version-selection tests: **PASS**
+- Real Chromium functional, migration and restore regression: **PASS**
+- Unchanged v4.2.1 embedded regression suite: **PASS**
+- Fresh v5→v6 migration: **PASS**
+- Actual v4.3→v4.2.0→v4.3 and v4.3→v4.2.1→v4.3 switching: **PASS**
+- Semantic preservation of todos, backlog and development jobs: **PASS**
+- Future schema block without data mutation: **PASS**
+- Mobile version-manager rendering: **PASS**
+- Browser page errors in tested flows: **0**
+
+The temporary PR-only test workflow was removed after the successful run and is not part of the release.
+
+**Publication candidate gate: PASS.**
