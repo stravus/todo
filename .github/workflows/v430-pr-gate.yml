@@ -1,0 +1,130 @@
+name: Todo v4.3.0 version-restore gate
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Static, syntax, snapshot and privacy checks
+        run: |
+          set -euo pipefail
+          test "$(git hash-object app-versions/v4.2.1.html)" = "2668975790e87a13d004b50c34c473db5d3062ce"
+          test "$(git hash-object app-versions/v4.2.0.html)" = "ab5484362d86ffdb4b7fc4cd246fb37c86aca48c"
+          test "$(git hash-object app-versions/v4.3.0.html)" = "$(git hash-object index.html)"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('index.html').read_text()
+          scripts=re.findall(r'<script>\s*(.*?)\s*</script>',s,re.S)
+          assert len(scripts)==1
+          Path('/tmp/root.js').write_text(scripts[0])
+          assert 'const SHELL_VERSION="4.3.0";' in s
+          assert 'todo-app-version-pin-v1' in s
+          assert 'app-versions/v4.2.1.html' in s
+          assert 'app-versions/v4.2.0.html' in s
+          assert 'doctrin-things-todo-v1' in s
+          assert 'content.dropboxapi.com' in s
+          for bad in ('sk-live-','github_pat_','ghp_','CAPA-251'):
+              assert bad not in s
+          for f in ('app-versions/v4.2.0.html','app-versions/v4.2.1.html','app-versions/v4.3.0.html'):
+              x=Path(f).read_text()
+              for bad in ('sk-live-','github_pat_','ghp_','CAPA-251'):
+                  assert bad not in x
+          PY
+          node --check /tmp/root.js
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('index.html').read_text(); js=re.search(r'<script>\s*(.*?)\s*</script>',s,re.S).group(1)
+          Path('/tmp/gen.js').write_text(js.rsplit('boot();',1)[0]+"console.log(versionUiScript('4.3.0'));\n")
+          PY
+          node /tmp/gen.js > /tmp/shell-tag.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('/tmp/shell-tag.txt').read_text(); m=re.fullmatch(r'<script id="toolVersionShellScript">(.*)</script>\n?',s,re.S); assert m
+          Path('/tmp/shell.js').write_text(m.group(1))
+          PY
+          node --check /tmp/shell.js
+          git diff --check origin/main...HEAD
+
+      - name: Pure version-selection tests
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('index.html').read_text(); js=re.search(r'<script>\s*(.*?)\s*</script>',s,re.S).group(1)
+          base=js.rsplit('boot();',1)[0]
+          tests=r'''
+          const assert=(v,m)=>{if(!v)throw new Error(m)};
+          const mem=new Map(); global.localStorage={getItem:k=>mem.has(k)?mem.get(k):null,setItem:(k,v)=>mem.set(k,String(v)),removeItem:k=>mem.delete(k)};
+          const d6=JSON.stringify({version:6,tasks:[{id:"x"}],backlog:[],devJobs:[]}); localStorage.setItem(DATA_STORAGE_KEY,d6);
+          assert(currentSelection().version==="4.3.0","default current");
+          localStorage.setItem(APP_PIN_KEY,"4.2.0"); assert(currentSelection().version==="4.2.0","compatible pin"); assert(localStorage.getItem(DATA_STORAGE_KEY)===d6,"pin mutated data");
+          const d5=JSON.stringify({version:5,tasks:[{id:"m"}],backlog:[]}); localStorage.setItem(DATA_STORAGE_KEY,d5); localStorage.setItem(APP_PIN_KEY,"4.2.0"); assert(currentSelection().version==="4.3.0","v5 migration fallback"); assert(localStorage.getItem(DATA_STORAGE_KEY)===d5,"shell mutated v5 data");
+          const d7=JSON.stringify({version:7,tasks:[{id:"future"}],backlog:[],devJobs:[]}); localStorage.setItem(DATA_STORAGE_KEY,d7); localStorage.setItem(APP_PIN_KEY,"4.2.1"); assert(currentSelection()===null,"future schema not blocked"); assert(localStorage.getItem(DATA_STORAGE_KEY)===d7,"future data mutated");
+          const core='<!doctype html><html><head></head><body><script>const APP_VERSION="4.2.1"; const DATA_VERSION=6;</'+'script></body></html>';
+          const injected=injectShell(core,releaseByVersion("4.3.0")); assert(injected.includes('toolVersionButton')); assert(injected.includes('const APP_VERSION="4.2.1"')); assert(localStorage.getItem(DATA_STORAGE_KEY)===d7);
+          console.log('PURE_VERSION_LOGIC_PASS');
+          '''
+          Path('/tmp/logic.js').write_text(base+tests)
+          PY
+          node --check /tmp/logic.js
+          node /tmp/logic.js
+
+      - name: Install Chromium
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0 >/dev/null 2>&1
+          npx playwright install --with-deps chromium >/dev/null 2>&1
+
+      - name: Real Chromium functional, migration and restore regression
+        run: |
+          python3 -m http.server 8000 >/tmp/http.log 2>&1 &
+          echo $! >/tmp/http.pid
+          sleep 1
+          cat > /tmp/browser.cjs <<'JS'
+          const { chromium } = require(process.cwd()+'/node_modules/playwright');
+          const fs=require('fs');
+          const assert=(v,m)=>{if(!v)throw new Error(m)};
+          const base='http://127.0.0.1:8000/';
+          const dataOnly=x=>JSON.stringify({tasks:x.tasks,backlog:x.backlog,devJobs:x.devJobs});
+          (async()=>{
+            const browser=await chromium.launch({headless:true}); const errors=[];
+            const st=await browser.newContext(); const sp=await st.newPage(); sp.on('pageerror',e=>errors.push('selftest:'+e));
+            await sp.goto(base+'?selftest=1',{waitUntil:'domcontentloaded'}); await sp.locator('#testSummary').waitFor({timeout:10000});
+            const summary=(await sp.locator('#testSummary').textContent()).trim(); assert(/^\d+\/\d+ PASS$/.test(summary),'embedded core regression failed: '+summary); fs.writeFileSync('/tmp/selftest-summary.txt',summary); await st.close();
+
+            const mc=await browser.newContext(); const mp=await mc.newPage(); mp.on('pageerror',e=>errors.push('migration:'+e)); await mp.goto(base,{waitUntil:'domcontentloaded'});
+            const old={version:5,appVersion:'4.1.0',updatedAt:'2026-08-01T00:00:00.000Z',tasks:[{id:'m1',title:'Synthetic migration task',notes:'',dueDate:'',tags:{next:false,followup:false,some:false,nextWeekFor:null},completed:false,completedAt:null,cleared:false,path:['Synthetic'],level:1,createdAt:'2026-08-01T00:00:00.000Z'}],backlog:[{id:'mb1',type:'bug',title:'Synthetic migration backlog',description:'generic fixture',selected:false,comment:'',status:'open',createdAt:'2026-08-01T00:00:00.000Z',updatedAt:'2026-08-01T00:00:00.000Z'}]};
+            await mp.evaluate(old=>localStorage.setItem('doctrin-things-todo-v1',JSON.stringify(old)),old); await mp.reload({waitUntil:'domcontentloaded'}); await mp.locator('#viewTitle').waitFor();
+            const migrated=await mp.evaluate(()=>JSON.parse(localStorage.getItem('doctrin-things-todo-v1'))); assert(migrated.version===6,'migration version'); assert(migrated.tasks.some(x=>x.id==='m1'),'migration lost todo'); assert(migrated.backlog.some(x=>x.id==='mb1'),'migration lost backlog'); assert(Array.isArray(migrated.devJobs),'migration devJobs'); await mc.close();
+
+            const rc=await browser.newContext(); const rp=await rc.newPage(); rp.on('pageerror',e=>errors.push('restore:'+e)); await rp.goto(base,{waitUntil:'domcontentloaded'});
+            const seed={version:6,appVersion:'4.2.1',updatedAt:'2026-08-22T06:00:00.000Z',tasks:[{id:'s1',title:'Synthetic restore task',notes:'',dueDate:'',tags:{next:false,followup:false,some:false,nextWeekFor:null},completed:false,completedAt:null,cleared:false,path:['Synthetic'],level:1,createdAt:'2026-08-22T06:00:00.000Z'}],backlog:[{id:'sb1',type:'improvement',title:'Synthetic restore backlog',description:'generic fixture',selected:false,comment:'',status:'open',createdAt:'2026-08-22T06:00:00.000Z',updatedAt:'2026-08-22T06:00:00.000Z'}],devJobs:[{id:'sj1',createdAt:'2026-08-22T06:00:00.000Z',updatedAt:'2026-08-22T06:00:00.000Z',status:'ready',backlogIds:['sb1'],prompt:'generic prompt',note:''}]};
+            await rp.evaluate(seed=>localStorage.setItem('doctrin-things-todo-v1',JSON.stringify(seed)),seed); await rp.reload({waitUntil:'domcontentloaded'}); await rp.locator('#toolVersionButton').waitFor();
+            const before=await rp.evaluate(()=>JSON.parse(localStorage.getItem('doctrin-things-todo-v1'))); const beforeData=dataOnly(before);
+            await rp.getByRole('button',{name:/Backlog & historik/}).click(); assert((await rp.locator('#viewSub').textContent()).includes('App v4.3.0'),'v4.3 history patch'); assert(await rp.locator('[data-shell-history="4.3.0"]').count()===1,'v4.3 history missing');
+            await rp.locator('#toolVersionButton').click(); await rp.locator('[data-tv-run="4.2.0"]').click(); await rp.locator('#toolVersionPinBanner').waitFor({timeout:10000}); assert((await rp.locator('#toolVersionPinBanner').textContent()).includes('v4.2.0'),'v4.2.0 not loaded');
+            let x=await rp.evaluate(()=>JSON.parse(localStorage.getItem('doctrin-things-todo-v1'))); assert(dataOnly(x)===beforeData,'user data changed loading v4.2.0');
+            await rp.locator('#toolVersionLatest').click(); await rp.locator('#toolVersionButton').waitFor({timeout:10000}); assert((await rp.locator('#toolVersionButton').textContent()).trim()==='v4.3.0','latest not restored'); x=await rp.evaluate(()=>JSON.parse(localStorage.getItem('doctrin-things-todo-v1'))); assert(dataOnly(x)===beforeData,'user data changed returning latest');
+            await rp.locator('#toolVersionButton').click(); await rp.locator('[data-tv-run="4.2.1"]').click(); await rp.locator('#toolVersionPinBanner').waitFor({timeout:10000}); assert((await rp.locator('#toolVersionPinBanner').textContent()).includes('v4.2.1'),'v4.2.1 not loaded'); x=await rp.evaluate(()=>JSON.parse(localStorage.getItem('doctrin-things-todo-v1'))); assert(dataOnly(x)===beforeData,'user data changed loading v4.2.1');
+            await rp.locator('#toolVersionLatest').click(); await rp.locator('#toolVersionButton').waitFor({timeout:10000});
+            const future='{"version":7,"appVersion":"future","tasks":[{"id":"future"}],"backlog":[],"devJobs":[]}'; await rp.evaluate(s=>{localStorage.setItem('doctrin-things-todo-v1',s);localStorage.setItem('todo-app-version-pin-v1','4.2.0')},future); await rp.reload({waitUntil:'domcontentloaded'}); await rp.locator('.boot-error').waitFor({timeout:10000}); assert(await rp.evaluate(()=>localStorage.getItem('doctrin-things-todo-v1'))===future,'future data mutated'); await rc.close();
+
+            const mobile=await browser.newContext({viewport:{width:390,height:844}}); const mob=await mobile.newPage(); mob.on('pageerror',e=>errors.push('mobile:'+e)); await mob.goto(base,{waitUntil:'domcontentloaded'}); await mob.locator('#toolVersionButton').click(); assert(await mob.locator('#toolVersionCard').isVisible(),'mobile manager hidden'); await mobile.close();
+            assert(errors.length===0,'page errors: '+errors.join(' | ')); fs.writeFileSync('/tmp/page-errors.txt',String(errors.length)); await browser.close(); console.log('BROWSER_VERSION_RESTORE_PASS',summary,'errors',errors.length);
+          })().catch(e=>{console.error(e);process.exit(1)});
+          JS
+          node /tmp/browser.cjs
+          kill $(cat /tmp/http.pid) || true
